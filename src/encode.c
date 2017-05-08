@@ -11,7 +11,7 @@ SEXP copy_to_new_vector(SEXP, unsigned long, unsigned long);
 SEXP current;
 int current_index;
 
-SEXP _packb(SEXP input, SEXP warn, SEXP compatible, SEXP use_arrays) {
+SEXP _packb(SEXP input, SEXP warn, SEXP compatible, SEXP all_arrays) {
   cw_pack_context cxt;
   
   /* allocate a raw SEXP, set global "current" so that we can reallocate  */

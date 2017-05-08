@@ -7,28 +7,31 @@ stringToRaw <- function(ch) {
   vapply(strsplit("hello", "")[[1]], charToRaw, raw(1))
 }
 
-
-pack_rt <- function(start) {
+pack_rt <- function (start, cmp) {
   "Pack and unpack and check that your data made the round trip (as defined by
    expect_equivalent)"
   bin <- packb(start)
+  expect_equal(bin, cmp)
   end <- unpackb(bin)
   expect_equivalent(start, end)
-  return(bin)
 }
 
 test_that("pack singletons", {
   #null
-  packb(NULL) %is% as.raw(0xc0)
+  pack_rt(NULL, as.raw(0xc0))
   #NA is encoded as null?
   packb(NA) %is% as.raw(0xc0)
 
   #logical
-  packb(FALSE) %is% as.raw(0xc2)
-  packb(TRUE) %is% as.raw(0xc3)
+  pack_rt(FALSE, as.raw(0xc2))
+  pack_rt(TRUE, as.raw(0xc3))
 
-  #int
-  packb(12L) %is% as.raw(0x0c)
+  #small ints
+  pack_rt(12L, as.raw(0x0c))
+  pack_rt(-4L, as.raw(0xfc))
+
+  #large ints
+  pack_rt(2147483647L, as.raw(c(0xCE, 0x7f, 0xff, 0xff, 0xff)))
 
   # cwpack will use 32 bit float if precision is preserved.
   # float32 representation of 5:
@@ -38,27 +41,22 @@ test_that("pack singletons", {
   #     0          10000001         010000000000000000000000
   # 01000000 10100000 00000000 00000000
   # 40 A0 00 00
-  expect_equal(packb(5),
-               as.raw(c(0xCA, 0x40, 0xA0, 0x00, 0x00)))
+  pack_rt(5, as.raw(c(0xCA, 0x40, 0xA0, 0x00, 0x00)))
 
   # float64:
   x <- 1.7976931348623157e308 # .Machine$double.xmax
   # 0 11111111110 1111111111111111111111111111111111111111111111111111
-  packb(x) %is% as.raw(c(0xCB, 0x7F, 0xEF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF))
+  pack_rt(x, as.raw(c(0xCB, 0x7F, 0xEF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF)))
 
   # character
-  expect_equal(packb("hello"),
-               as.raw(c(0xa5, 0x68, 0x65, 0x6c, 0x6c, 0x6f)))
-  expect_equal(packb(NA_character_), as.raw(0xc0))
+  pack_rt("hello",
+          as.raw(c(0xa5, 0x68, 0x65, 0x6c, 0x6c, 0x6f)))
+
+  packb(NA_character_ %is% as.raw(0xc0)) #does not round tril
 })
 
 test_that("Pack vectors", {
   stop("not written")
-})
-
-test_that("Unpack singletons", {
-  stop("not written")
-  # just roundtrip the above...
 })
 
 test_that("pack zero length vectors", {
@@ -85,12 +83,23 @@ test_that("overflow handler works", {
   stop("not written")
 })
 
+test_that("unpack into envs", {
+  stop("not written")
+})
+
+test_that("not simplifying", {
+  stop("not written")
+})
+
+test_that("not simplifying", {
+  stop("not written")
+})
+
 test_that("Homepage example", {
-  x <- packb(list(compact=TRUE, schema=0))
-  cmp <- c(as.raw(c(0x82, 0xa7)),
-           charToRaw("compact"),
-           as.raw(c(0xc3, 0xa6)),
-           charToRaw("schema"),
-           as.raw(00))
-  x %is% cmp
+  pack_rt(list(compact=TRUE, schema=0),
+          c(as.raw(c(0x82, 0xa7)),
+            charToRaw("compact"),
+            as.raw(c(0xc3, 0xa6)),
+            charToRaw("schema"),
+            as.raw(00)))
 })

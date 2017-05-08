@@ -4,9 +4,20 @@
 \alias{packb}
 \title{Encode R data structures in bytes using msgpack.}
 \usage{
-packb(datum, warn = TRUE, compatible = FALSE, use_arrays = "auto")
+packb(datum, warn = TRUE, compatible = FALSE, all_arrays = TRUE)
 }
 \arguments{
+\item{datum}{An R object.}
+
+\item{warn}{Whether to emit warnings.}
+
+\item{compatible}{If TRUE, emitted bytes conform to version 1.0 of
+msgpack encoding.}
+
+\item{always_arrays}{If TRUE, vectors of length 1 having no names
+attribute are encoded as msgpack arrays of length 1. Otherwise singleton
+vectors are encoded as msgpack scalars.}
+
 \item{x}{An R object.}
 }
 \value{
