@@ -7,6 +7,13 @@ stringToRaw <- function(ch) {
   vapply(strsplit("hello", "")[[1]], charToRaw, raw(1))
 }
 
+roundtrip <- function(start) {
+  bin <- packb(start)
+  end <- unpackb(bin)
+  expect_identical(start, end)
+  bin
+}
+
 pack_rt <- function (start, cmp) {
   "Pack and unpack and check that your data made the round trip (as defined by
    expect_equivalent)"
@@ -52,23 +59,42 @@ test_that("pack singletons", {
   pack_rt("hello",
           as.raw(c(0xa5, 0x68, 0x65, 0x6c, 0x6c, 0x6f)))
 
-  packb(NA_character_ %is% as.raw(0xc0)) #does not round tril
+  # raw character
+   pack_rt(as.raw(0xab),
+          as.raw(c(0xc4, 0x01, 0xab)))
+
+  packb(NA_character_)  %is% as.raw(0xc0) #does not round trip
+})
+
+test_that("Pack raws", {
+  roundtrip(as.raw(c(0xab, 0xbc, 0x00)))
+})
+
+test_that("Pack lists", {
+  roundtrip(list(1, "what"))
+  roundtrip(list("a", list("b", 4)))
 })
 
 test_that("Pack vectors", {
-  stop("not written")
+  roundtrip(c(FALSE, TRUE))
+  roundtrip(c(1L, 2L))
+  roundtrip(c(exp(0), pi))
+  roundtrip(c("hi", "bye"))
+})
+
+test_that("Pack vectors with NA", {
+  roundtrip(c(FALSE, NA, TRUE))
+  roundtrip(c(1L, 2L, NA))
+  roundtrip(c(exp(0), pi, NA))
+  roundtrip(c("hi", "bye", NA))
 })
 
 test_that("pack zero length vectors", {
-  stop("not written")
-})
-
-test_that("Vectors with NAs", {
-  stop("not written")
+  roundtrip(c())
 })
 
 test_that("NA and NaN are distinct doubles,", {
-  stop("not written")
+  roundtrip(c(NA, NaN))
 })
 
 test_that("compatibility mode", {

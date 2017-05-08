@@ -1,14 +1,5 @@
 #include "cwpack.h"
-#include <R.h>
-#include <Rinternals.h>
-
-void assert_type(SEXP, SEXPTYPE);
-
-void assert_type(SEXP x, SEXPTYPE type) {
-  if (TYPEOF(x) != type) {
-    error("Expected %s, got %s", type2char(type), type2char(TYPEOF(x)));
-  }
-}
+#include "vadr.h"
 
 int underflow_handler(cw_unpack_context *cxt, unsigned long wanted) {
   error("Underflow (need %d more bytes)", wanted);
@@ -52,7 +43,13 @@ SEXP extract_value(cw_unpack_context *cxt) {
     return ScalarString(mkCharLen(cxt->item.as.str.start, cxt->item.as.str.length));
 
   case CWP_ITEM_BIN:
-    error("bin not handled");
+    {
+      uint32_t len = cxt->item.as.bin.length;
+      SEXP out = PROTECT(allocVector(RAWSXP, len));
+      memcpy(RAW(out), cxt->item.as.bin.start, len * sizeof(uint8_t));
+      UNPROTECT(1);
+      return out;
+    }
 
   case CWP_ITEM_ARRAY:
     error("array not handled");

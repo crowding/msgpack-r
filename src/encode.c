@@ -1,12 +1,19 @@
 #include "cwpack.h"
-#include <R.h>
-#include <Rinternals.h>
-
-#define MIN(x,y) ((x) < (y) ? (x) : (y))
+#include "vadr.h"
 
 void pack_sexp(cw_pack_context* cxt, SEXP input);
 int handle_overflow(cw_pack_context *, unsigned long);
-SEXP copy_to_new_vector(SEXP, unsigned long, unsigned long);
+SEXP copy_to_new_raw(SEXP, unsigned long, unsigned long);
+
+void pack_sexp(cw_pack_context *, SEXP);
+void pack_singleton(cw_pack_context *, SEXP);
+void pack_vector(cw_pack_context*, SEXP);
+
+void pack_logical(cw_pack_context *, int);
+void pack_integer(cw_pack_context *, int);
+void pack_real(cw_pack_context *, double);
+void pack_string(cw_pack_context *, SEXP);
+void pack_raw(cw_pack_context *, SEXP);
 
 SEXP current;
 int current_index;
@@ -28,16 +35,15 @@ SEXP _packb(SEXP input, SEXP warn, SEXP compatible, SEXP all_arrays) {
   UNPROTECT(1);
 
   SETLENGTH(out, (cxt.current - cxt.start) / sizeof(Rbyte));
-  
   return out;
 }
 
 int handle_overflow(cw_pack_context *cxt, unsigned long more) {
-  // allocate a vector twice as big and copy data into the new vector.
+  /* allocate a vector twice as big, copy data into the new vector, and update context. */
   unsigned long newlen = LENGTH(current);
   unsigned long req = LENGTH(current) + more;
   while (newlen < req) newlen *= 2;
-  REPROTECT(current = copy_to_new_vector(current, newlen, LENGTH(current)),
+  REPROTECT(current = copy_to_new_raw(current, newlen, LENGTH(current)),
             current_index);
 
   // update the context structure to point to the new buf
@@ -47,15 +53,13 @@ int handle_overflow(cw_pack_context *cxt, unsigned long more) {
   return 1;
 }
 
-SEXP copy_to_new_vector(SEXP from, unsigned long new_len, unsigned long copy_len) {
+SEXP copy_to_new_raw(SEXP from, unsigned long new_len, unsigned long copy_len) {
+  assert_type(from, RAWSXP);
   SEXP to = PROTECT(allocVector(RAWSXP, new_len));
   memcpy(RAW(to), RAW(from), MIN(new_len, copy_len) * sizeof(Rbyte));
   UNPROTECT(1);
   return to;
 }
-
-void pack_singleton(cw_pack_context*, SEXP);
-void pack_vector(cw_pack_context*, SEXP);
 
 void pack_sexp(cw_pack_context* cxt, SEXP dat) {
   if (isVector(dat)) {
@@ -75,47 +79,114 @@ void pack_sexp(cw_pack_context* cxt, SEXP dat) {
 void pack_singleton(cw_pack_context *cxt, SEXP dat) {
   switch (TYPEOF(dat)) {
   case LGLSXP:
-    if (LOGICAL(dat)[0] == NA_LOGICAL) {
-      cw_pack_nil(cxt);
-    } else if (LOGICAL(dat)[0]) {
-      cw_pack_true(cxt);
-    } else {
-      cw_pack_false(cxt);
-    }
-    return;
+    pack_logical(cxt, LOGICAL(dat)[0]);
+    break;
     
   case INTSXP:
-    if (INTEGER(dat)[0] == NA_INTEGER) {
-      cw_pack_nil(cxt);
-    } else {
-      cw_pack_signed(cxt, INTEGER(dat)[0]);
-    }
-    return;
+    pack_integer(cxt, INTEGER(dat)[0]);
+    break;
     
   case REALSXP:
-    // Numeric NA and NAN should be represented faithfully
-    cw_pack_real(cxt, REAL(dat)[0]);
-    return;
+    pack_real(cxt, REAL(dat)[0]);
+    break;
     
   case STRSXP:
-    if (STRING_ELT(dat, 0) == NA_STRING) {
-      cw_pack_nil(cxt);
-    } else {
-      int len = R_nchar(STRING_ELT(dat, 0), Bytes, 0, 0, "");
-      cw_pack_str(cxt, CHAR(STRING_ELT(dat, 0)), len);
-    }
-    return;
+    pack_string(cxt, STRING_ELT(dat, 0));
+    break;
+
+  case RAWSXP:
+    pack_raw(cxt, dat);
+    break;
     
+  case VECSXP:
+    pack_vector(cxt, dat);
+    break;
+
   default:
     error("can't pack a singleton %s", type2char(TYPEOF(dat)));
-    return;
   }
 }
 
-void pack_vector(cw_pack_context *cxt, SEXP dat) {
-  switch(TYPEOF(dat)) {
-  default: error("can't pack a vector %s", type2char(TYPEOF(dat))); return;
+// genericity via macros, oh dear
+#define LOGICAL_ELT(O, I) (LOGICAL(O)[i])
+#define INTEGER_ELT(O, I) (INTEGER(O)[i])
+#define REAL_ELT(O, I) (INTEGER(O)[i])
+
+#define PACK_VECTOR(CXT, X, ACCESSOR, STORE) {  \
+    cw_pack_array_size(cxt, LENGTH(X));         \
+    for (int i = 0; i < 1; i++) {               \
+      STORE(CXT, ACCESSOR(X, i));               \
+    }                                           \
+  }
+
+void pack_vector(cw_pack_context *cxt, SEXP x) {
+  ASSERT(isVector(x));
+  
+  switch(TYPEOF(x)) {
+
+  case RAWSXP:
+    pack_raw(cxt, x);
+    break;
+    
+  case LGLSXP:
+    PACK_VECTOR(cxt, x, LOGICAL_ELT, pack_logical);
+    break;
+    
+  case INTSXP:
+    PACK_VECTOR(cxt, x, INTEGER_ELT, pack_integer);
+    break;
+
+  case REALSXP:
+    PACK_VECTOR(cxt, x, REAL_ELT, pack_real);
+    break;
+
+  case VECSXP:
+    PACK_VECTOR(cxt, x, VECTOR_ELT, pack_sexp);
+    break;
+
+  case STRSXP:
+    PACK_VECTOR(cxt, x, STRING_ELT, pack_string);
+    break;
+
+  default:
+    error("Don't know how to pack a %s vector", type2char(TYPEOF(x)));
   }
 }
 
+void pack_logical(cw_pack_context *cxt, int x) {
+  if (x == NA_LOGICAL) {
+    cw_pack_nil(cxt);
+  } else if (x) {
+    cw_pack_true(cxt);
+  } else {
+    cw_pack_false(cxt);
+  }
+}
 
+void pack_integer(cw_pack_context *cxt, int x) {
+  if (x == NA_INTEGER) {
+    cw_pack_nil(cxt);
+  } else {
+    cw_pack_signed(cxt, x);
+  }
+}
+
+void pack_real(cw_pack_context *cxt, double x) {
+  // Numeric NA and NAN need no handling for reals
+  cw_pack_real(cxt, x);
+}
+
+void pack_string(cw_pack_context *cxt, SEXP x) {
+  assert_type(x, CHARSXP);
+  if (x == NA_STRING) {
+    cw_pack_nil(cxt);
+  } else {
+    int len = R_nchar(x, Bytes, 0, 0, "");
+    cw_pack_str(cxt, CHAR(x), len);
+  }
+}
+
+void pack_raw(cw_pack_context *cxt, SEXP x) {
+  assert_type(x, RAWSXP);
+  cw_pack_bin(cxt, RAW(x), LENGTH(x));
+}
