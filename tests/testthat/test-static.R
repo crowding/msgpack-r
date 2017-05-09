@@ -27,8 +27,7 @@ pack_rt <- function (start, cmp) {
 
 test_that("pack singletons", {
   #null
-  pack_rt(NULL, as.raw(0xc0))
-  #NA is encoded as null?
+  pack_rt(NULL, as.raw(0xc0)) #NA is encoded as null?
   packb(NA) %is% as.raw(0xc0)
 
   #logical
@@ -86,11 +85,13 @@ test_that("Pack lists", {
 })
 
 test_that("Pack simplified vectors", {
-  roundtrip(c(FALSE, TRUE))
-  roundtrip(c(1L, 2L))
-  roundtrip(c(exp(0), pi))
-  roundtrip(c("hi", "bye"))
+  roundtrip(c(NA, FALSE)) #bool
+  roundtrip(c(NA, FALSE, 1L)) #integer
+  roundtrip(c(NA, FALSE, 1L, 1.0)) #real
+  roundtrip(list(NULL, FALSE, 1L, 1.0, "hi")) #list, don't coerce to char
+  roundtrip(list(NULL, FALSE, 1L, 1.0, list(5))) #list
 })
+
 
 test_that("Pack vectors with NA", {
   roundtrip(c(FALSE, NA, TRUE))
