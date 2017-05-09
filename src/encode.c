@@ -15,12 +15,17 @@ void pack_real(cw_pack_context *, double);
 void pack_string(cw_pack_context *, SEXP);
 void pack_raw(cw_pack_context *, SEXP);
 
-SEXP current;
-int current_index;
+SEXP current = NULL;
+int current_index = 0;
 
 SEXP _packb(SEXP input, SEXP warn, SEXP compatible, SEXP all_arrays) {
   cw_pack_context cxt;
-  
+
+  if (current != NULL) {
+    // hmmmm.
+    current = NULL;
+    error("Recursive use of _packb is not allowed");
+  }
   /* allocate a raw SEXP, set global "current" so that we can reallocate  */
   unsigned long len = 256;
   PROTECT_WITH_INDEX(current = allocVector(RAWSXP, len), &current_index);
@@ -31,10 +36,9 @@ SEXP _packb(SEXP input, SEXP warn, SEXP compatible, SEXP all_arrays) {
   pack_sexp(&cxt, input);
   
   SEXP out = current;
-  current = R_NilValue;
-  UNPROTECT(1);
-
+  current = NULL;
   SETLENGTH(out, (cxt.current - cxt.start) / sizeof(Rbyte));
+  UNPROTECT(1);
   return out;
 }
 
@@ -70,8 +74,13 @@ void pack_sexp(cw_pack_context* cxt, SEXP dat) {
     }
   } else {
     switch (TYPEOF(dat)) {
-    case NILSXP: cw_pack_nil(cxt); break;
-    default: error("can't pack a %s", type2char(TYPEOF(dat)));
+
+    case NILSXP:
+      cw_pack_nil(cxt); break;
+
+    default:
+      current = NULL;
+      error("can't pack a %s", type2char(TYPEOF(dat)));
     }
   }
 }
@@ -101,8 +110,9 @@ void pack_singleton(cw_pack_context *cxt, SEXP dat) {
   case VECSXP:
     pack_vector(cxt, dat);
     break;
-
+ 
   default:
+    current = NULL;
     error("can't pack a singleton %s", type2char(TYPEOF(dat)));
   }
 }
@@ -110,13 +120,14 @@ void pack_singleton(cw_pack_context *cxt, SEXP dat) {
 // genericity via macros, oh dear
 #define LOGICAL_ELT(O, I) (LOGICAL(O)[i])
 #define INTEGER_ELT(O, I) (INTEGER(O)[i])
-#define REAL_ELT(O, I) (INTEGER(O)[i])
+#define REAL_ELT(O, I) (REAL(O)[i])
 
-#define PACK_VECTOR(CXT, X, ACCESSOR, STORE) {  \
-    cw_pack_array_size(cxt, LENGTH(X));         \
-    for (int i = 0; i < 1; i++) {               \
-      STORE(CXT, ACCESSOR(X, i));               \
-    }                                           \
+#define PACK_VECTOR(CXT, X, ACCESSOR, STORE) {     \
+    int len = LENGTH(X);                           \
+    cw_pack_array_size(cxt, len);                  \
+    for (int i = 0; i < len; i++) {                \
+      STORE(CXT, ACCESSOR(X, i));                  \
+    }                                              \
   }
 
 void pack_vector(cw_pack_context *cxt, SEXP x) {
@@ -149,6 +160,7 @@ void pack_vector(cw_pack_context *cxt, SEXP x) {
     break;
 
   default:
+    current = NULL;
     error("Don't know how to pack a %s vector", type2char(TYPEOF(x)));
   }
 }

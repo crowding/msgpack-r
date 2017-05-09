@@ -7,12 +7,14 @@ stringToRaw <- function(ch) {
   vapply(strsplit("hello", "")[[1]], charToRaw, raw(1))
 }
 
+
 roundtrip <- function(start) {
   bin <- packb(start)
   end <- unpackb(bin)
   expect_identical(start, end)
   bin
 }
+
 
 pack_rt <- function (start, cmp) {
   "Pack and unpack and check that your data made the round trip (as defined by
@@ -66,16 +68,24 @@ test_that("pack singletons", {
   packb(NA_character_)  %is% as.raw(0xc0) #does not round trip
 })
 
+
+test_that("nice errors from unpack", {
+  expect_error(unpackb(as.raw(c(0x92, 0xc0))),
+               "end of input")
+})
+
+
 test_that("Pack raws", {
   roundtrip(as.raw(c(0xab, 0xbc, 0x00)))
 })
+
 
 test_that("Pack lists", {
   roundtrip(list(1, "what"))
   roundtrip(list("a", list("b", 4)))
 })
 
-test_that("Pack vectors", {
+test_that("Pack simplified vectors", {
   roundtrip(c(FALSE, TRUE))
   roundtrip(c(1L, 2L))
   roundtrip(c(exp(0), pi))
@@ -89,37 +99,41 @@ test_that("Pack vectors with NA", {
   roundtrip(c("hi", "bye", NA))
 })
 
+
 test_that("pack zero length vectors", {
   roundtrip(c())
 })
+
 
 test_that("NA and NaN are distinct doubles,", {
   roundtrip(c(NA, NaN))
 })
 
+
 test_that("compatibility mode", {
   stop("not written")
 })
+
 
 test_that("use arrays for singletons", {
   stop("not written")
 })
 
+
 test_that("overflow handler works", {
   stop("not written")
 })
+
 
 test_that("unpack into envs", {
   stop("not written")
 })
 
-test_that("not simplifying", {
-  stop("not written")
-})
 
 test_that("not simplifying", {
   stop("not written")
 })
+
 
 test_that("Homepage example", {
   pack_rt(list(compact=TRUE, schema=0),
@@ -129,3 +143,11 @@ test_that("Homepage example", {
             charToRaw("schema"),
             as.raw(00)))
 })
+
+test_that("extension data types", {
+  stop("not written")
+})
+
+test_that("recursion not allowed", {
+  stop("not written")
+});
