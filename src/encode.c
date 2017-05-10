@@ -118,10 +118,6 @@ void pack_singleton(cw_pack_context *cxt, SEXP dat) {
 }
 
 // genericity via macros, oh dear
-#define LOGICAL_ELT(O, I) (LOGICAL(O)[i])
-#define INTEGER_ELT(O, I) (INTEGER(O)[i])
-#define REAL_ELT(O, I) (REAL(O)[i])
-
 #define PACK_VECTOR(CXT, X, ACCESSOR, STORE) {     \
     int len = LENGTH(X);                           \
     cw_pack_array_size(cxt, len);                  \

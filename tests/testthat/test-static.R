@@ -38,7 +38,7 @@ test_that("pack singletons", {
   pack_rt(12L, as.raw(0x0c))
   pack_rt(-4L, as.raw(0xfc))
 
-  #large ints
+  #32 bit ints
   pack_rt(2147483647L, as.raw(c(0xCE, 0x7f, 0xff, 0xff, 0xff)))
 
   # cwpack will use 32 bit float if precision is preserved.
@@ -68,6 +68,20 @@ test_that("pack singletons", {
 })
 
 
+test_that("unpack large ints to float", {
+  bigint = as.raw(c(0xcf, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01))
+  negint = as.raw(c(0xd3, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xff, 0xff))
+  not_na = as.raw(c(0xd3, 0xff, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00))
+  bigfloat = 9007199254740993 #read as float loses precision
+  negfloat = -2147483649
+  not_nafloat = -2147483648
+  expect_warning(unpackb(bigint) %is% float, "precision")
+  unpackb(negint) %is% negfloat
+  unpackb(not_na) %is% not_nafloat
+  unpackb(c(as.raw(0x93), bigint, negint, not_na)) %is% c(float, negfloat, not_na_float)
+})
+
+
 test_that("nice errors from unpack", {
   expect_error(unpackb(as.raw(c(0x92, 0xc0))),
                "end of input")
@@ -84,20 +98,22 @@ test_that("Pack lists", {
   roundtrip(list("a", list("b", 4)))
 })
 
-test_that("Pack simplified vectors", {
-  roundtrip(c(NA, FALSE)) #bool
-  roundtrip(c(NA, FALSE, 1L)) #integer
-  roundtrip(c(NA, FALSE, 1L, 1.0)) #real
-  roundtrip(list(NULL, FALSE, 1L, 1.0, "hi")) #list, don't coerce to char
-  roundtrip(list(NULL, FALSE, 1L, 1.0, list(5))) #list
+test_that("unpack simplified vectors", {
+    roundtrip(c(FALSE, NA)) #bool
+    roundtrip(list(FALSE, 3L)) #list; don't coerce logicals (that aren't all NA)
+    roundtrip(c(1L, NA)) #integer
+    roundtrip(c(1L, NA, 1.0)) #real
+    roundtrip(c("hello", NA)) #string
+    roundtrip(list(1L, 1.0, "hi")) #list, don't coerce to char
+    roundtrip(list(c(1,2), c("hi", "bye"))) #list
 })
 
 
-test_that("Pack vectors with NA", {
-  roundtrip(c(FALSE, NA, TRUE))
-  roundtrip(c(1L, 2L, NA))
-  roundtrip(c(exp(0), pi, NA))
-  roundtrip(c("hi", "bye", NA))
+test_that("unpack simplified vectors starting with NA", {
+  roundtrip(c(NA, FALSE, TRUE))
+  roundtrip(c(NA, 1L, 2L))
+  roundtrip(c(NA, exp(0), pi))
+  roundtrip(c(NA, "hi", "bye"))
 })
 
 
@@ -121,7 +137,7 @@ test_that("use arrays for singletons", {
 })
 
 
-test_that("overflow handler works", {
+test_that("packing overflow handler works", {
   stop("not written")
 })
 
