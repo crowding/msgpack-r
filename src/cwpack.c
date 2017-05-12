@@ -453,7 +453,7 @@ void cw_unpack_next (cw_unpack_context* unpack_context)
         case 0xa8: case 0xa9: case 0xaa: case 0xab: case 0xac: case 0xad: case 0xae: case 0xaf:
         case 0xb0: case 0xb1: case 0xb2: case 0xb3: case 0xb4: case 0xb5: case 0xb6: case 0xb7:
         case 0xb8: case 0xb9: case 0xba: case 0xbb: case 0xbc: case 0xbd: case 0xbe: case 0xbf:
-                    getDDItem(CWP_ITEM_STR, str.length, c & 0x1f);              // fixraw
+                    getDDItem(CWP_ITEM_STR, str.length, c & 0x1f);              // fixstr
                     cw_unpack_assert_blob(str);
         case 0xc0:  unpack_context->item.type = CWP_ITEM_NIL;           return;  // nil
         case 0xc2:  getDDItem(CWP_ITEM_BOOLEAN, boolean, false);        return;  // false

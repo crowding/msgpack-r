@@ -31,7 +31,7 @@ SEXP _packb(SEXP input) {
   PROTECT_WITH_INDEX(current = allocVector(RAWSXP, len), &current_index);
   
   cw_pack_context_init(&cxt, RAW(current), len, &handle_overflow);
-  cw_pack_set_compatibility(&cxt, TRUE);
+  cw_pack_set_compatibility(&cxt, FALSE);
 
   pack_sexp(&cxt, input);
   

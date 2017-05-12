@@ -1,4 +1,4 @@
-context("msgpackr static API")
+ context("msgpackr static API")
 
 `%is%` <- expect_equal
 
@@ -16,12 +16,12 @@ roundtrip <- function(start) {
 }
 
 
-pack_rt <- function (start, cmp) {
+pack_rt <- function (start, cmp, ...) {
   "Pack and unpack and check that your data made the round trip (as defined by
    expect_equivalent)"
-  bin <- packb(start)
+  bin <- packb(start, ...)
   expect_equal(bin, cmp)
-  end <- unpackb(bin)
+  end <- unpackb(bin, ...)
   expect_equivalent(start, end)
 }
 
@@ -75,13 +75,16 @@ test_that("unpack large ints to float", {
   not_na = as.raw(c(0xd3, 0xff, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00))
   bigfloat = 9007199254740993 #read as float loses precision
   negfloat = -2147483649
-  not_nafloat = -2147483648
-  expect_warning(unpackb(bigint) %is% float, "precision")
+  not_na_float = -2147483648
+  expect_warning(unpackb(bigint) %is% bigfloat, "precision")
   unpackb(negint) %is% negfloat
   unpackb(not_na) %is% not_nafloat
   #
   # and all in a vector...
-  unpackb(c(as.raw(0x93), bigint, negint, not_na)) %is% c(float, negfloat, not_na_float)
+  expect_warning(
+   unpackb(c(as.raw(0x93), bigint, negint, not_na)) %is%
+     c(bigfloat, negfloat, not_na_float),
+   "precision")
 })
 
 
@@ -132,33 +135,65 @@ test_that("NA and NaN are distinct doubles,", {
 
 
 test_that("compatibility mode", {
-  stop("not written")
+  packb(as.raw(c(1, 2, 3))) %is% as.raw(c(0x0))
+  packb(as.raw(c("abc")), compatible=TRUE) %is% as.raw(c(0xa3, 0x01, 0x02, 0x03))
 })
 
 
-test_that("use arrays for singletons", {
-  stop("not written")
+test_that("Unpackb: detect bad strings and return raw instead", {
+  expect_warning(expect_equal(unpackb(as.raw(c(0xa3, 0x00, 0x62, 0x63))),
+                              as.raw(c(0x00, 0x62, 0x63))),
+                 "null")
+
+  #also for malformed UTF8?
+  stop("Not written")
+})
+
+test_that("always emit strings in UTF8 encoding", {
+  stop("Not written")
+})
+
+test_that("as_is: use arrays even for singletons", {
+  packb(list(1, 2, 3)) %is% as.raw(0x00)
+  packb(list(1, 2, 3), as_is=TRUE) %is% as.raw(0x00)
+  packb(I(list(1, 2, 3))) %is% as.raw(0x00)
 })
 
 
 test_that("packing overflow handler works", {
-  stop("not written")
+  expect_true(length(packb(1:10000)) > 1000)
+})
+
+test_that("pack named vectors into dicts", {
+  packb(list(a=1, b=NULL)) %is% as.raw(c(0x00))
+  packb(list(a=1, b=NULL), dict=FALSE) %is% as.raw(c(0x00))
+})
+
+test_that("unpack dicts into envs", {
+  e = unpackb(packb(list(a=1, b=NULL)), envs=TRUE)
+  typeof(e) %is% "environment"
+  e$a %is% 1
+  e$b %is% NULL
+  e = unpackb(packb(list(a=1, b=NULL)), envs=FALSE)
+  typeof(e) %is% "list"
+  class
+  typeof(mode(unpack(pack(as.evironment(list(a=1, b=2))))) %is% "list")
+  typeof(mode(unpack(pack(as.evironment(list(a=1, b=2))))) %is% "list")
+    mode(unpack(pack(as.evironment(list(a=1, b=2))))) %is% "list"
+  class(unpack(pack(x)))
 })
 
 
-test_that("unpack into envs", {
-  stop("not written")
+test_that("unpackb refusing to simplify", {
+  unpackb(packb(list(1, 2))) %is% c(1L, 2L)
+  unpackb(packb(list(1, 2)), simplify=FALSE) %is% list(1L, 2L)
 })
 
 
-test_that("not simplifying", {
-  stop("not written")
-})
-
-
-test_that("customize treatment of nil values", {
+test_that("unpack treatment of nil values", {
  stop("not written")
 })
+
 
 test_that("Homepage example", {
   pack_rt(list(compact=TRUE, schema=0),
@@ -175,7 +210,7 @@ test_that("extension data types", {
 })
 
 
-test_that("recursion not allowed", {
+test_that("packing recursion not allowed (or is)", {
   stop("not written")
 });
 
