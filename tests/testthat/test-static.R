@@ -165,8 +165,10 @@ test_that("Unpackb: detect bad strings, warn, and return raw", {
 
 })
 
-test_that("always emit strings in UTF8 encoding", {
-  stop("Not written")
+test_that("always emit strings in UTF8,", {
+  x <- "fa\xE7ile"
+  Encoding(x) <- "latin1"
+  packb(x) %is% as.raw(c(0xa7, 0x66, 0x61, 0xc3, 0xa7, 0x69, 0x6c, 0x65))
 })
 
 test_that("as_is: use arrays even for singletons", {

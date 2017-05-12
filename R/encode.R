@@ -12,11 +12,14 @@
 #' @param use.dicts if TRUE, vectors having a "names" attribute
 #' @param x An R object.
 #' @return An object of class "raw".
+#'
+#' Strings are always emitted in UTF-8.
+#'
 #' @useDynLib msgpackr _packb
 packb <- function(x
                   , compatible = FALSE
-                  #, warn = TRUE
                   #, as_is = FALSE
+                  #, warn = TRUE
                   #, null = null
                   #, na = null
                   ) {

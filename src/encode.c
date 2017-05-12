@@ -190,8 +190,20 @@ void pack_string(cw_pack_context *cxt, SEXP x) {
   if (x == NA_STRING) {
     cw_pack_nil(cxt);
   } else {
-    int len = R_nchar(x, Bytes, 0, 0, "");
-    cw_pack_str(cxt, CHAR(x), len);
+    if (getCharCE(x) != CE_UTF8) {
+      /* reEnc allocates temp memory */
+      void *vmax = vmaxget();
+      const char *newbuf = reEnc(CHAR(x), getCharCE(x), CE_UTF8, 1);
+      x = PROTECT(mkCharCE(newbuf, CE_UTF8));
+      int len = R_nchar(x, Bytes, 0, 0, "");
+      cw_pack_str(cxt, CHAR(x), len);
+      UNPROTECT(1);
+      /* free temp memory */
+      vmaxset(vmax);
+    } else {
+      int len = R_nchar(x, Bytes, 0, 0, "");
+      cw_pack_str(cxt, CHAR(x), len);
+    }
   }
 }
 

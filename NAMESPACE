@@ -2,4 +2,3 @@
 
 useDynLib(msgpackr,"_packb")
 useDynLib(msgpackr,"_unpackb")
-useDynLib(msgpackr,"_wtf")
