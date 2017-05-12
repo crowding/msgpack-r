@@ -14,11 +14,11 @@
 #' @return An object of class "raw".
 #' @useDynLib msgpackr _packb
 packb <- function(x
+                  , compatible = FALSE
                   #, warn = TRUE
-                  #, compatible = FALSE
                   #, as_is = FALSE
                   #, null = null
                   #, na = null
                   ) {
-  .Call(`_packb`, x)
+  .Call(`_packb`, x, compatible)
 }

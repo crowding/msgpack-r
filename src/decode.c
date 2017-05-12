@@ -1,6 +1,7 @@
 #include <inttypes.h>
 #include "cwpack.h"
 #include "vadr.h"
+#include "utf8.h"
 
 SEXP _unpackb(SEXP);
 
@@ -16,6 +17,8 @@ SEXP coerce(SEXP, SEXPTYPE);
 const char *decode_return_code(int);
 const char *decode_item_type(cwpack_item_types);
 
+int check_string(const char *x, int len);
+
 double i64_to_double(int64_t x);
 double u64_to_double(uint64_t x);
 
@@ -28,7 +31,6 @@ static int depth = 0;
           MIN (depth, 40), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>!",  \
           __FUNCTION__,                                                 \
           ## __VA_ARGS__)
-
 
 SEXP _unpackb(SEXP dat) {
   assert_type(dat, RAWSXP);
@@ -79,11 +81,27 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
       return out;
     }
 
+  case CWP_ITEM_STR: {
+    if (!check_string(cxt->item.as.str.start,
+                      cxt->item.as.str.length)) {
+      /* pack in a bin, (already warned) */
+      uint32_t len = cxt->item.as.str.length;
+      SEXP out = PROTECT(allocVector(RAWSXP, len));
+      memcpy(RAW(out), cxt->item.as.str.start, len * sizeof(uint8_t));
+      UNPROTECT(1);
+      return out;
+    } else {
+      return ScalarString(mkCharLenCE(cxt->item.as.str.start,
+                                      cxt->item.as.str.length,
+                                       CE_UTF8));
+    }
+  }
+    break;
+    
   case CWP_ITEM_NEGATIVE_INTEGER:
   case CWP_ITEM_POSITIVE_INTEGER:
   case CWP_ITEM_FLOAT:
-  case CWP_ITEM_DOUBLE:
-  case CWP_ITEM_STR: {
+  case CWP_ITEM_DOUBLE: {
     SEXP buf;
     PROTECT_INDEX ix;
 
@@ -290,10 +308,16 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len, PROTECT_INDEX i
         break;
 
       case CWP_ITEM_STR:
-        SET_STRING_ELT(buf,
-                       i,
-                       mkCharLen(cxt->item.as.str.start,
-                                 cxt->item.as.str.length));
+        if (!check_string(cxt->item.as.str.start,
+                          cxt->item.as.str.length)) {
+          REPROTECT(buf = coerce(buf, VECSXP), ix);
+          goto UNPACK_VALUE;
+        } else {
+          SET_STRING_ELT(buf,
+                         i,
+                         mkCharLen(cxt->item.as.str.start,
+                                   cxt->item.as.str.length));
+        }
         break;
 
       default:
@@ -328,11 +352,34 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len, PROTECT_INDEX i
 }
 
 
+int check_string(const char *x, int len) {
+  int non_ascii = 0;
+  for (int i = 0; i < len; i++) {
+    if (x[i] == 0) {
+      WARN_ONCE("Embedded null in string, returning raw instead.");
+      return 0;
+    }
+    if (x[i] & 0x80) {
+      non_ascii = 1;
+    }
+  }
+
+  /* maybe overly paranoid but I didn't see mkCharLenCE doing any verification */
+  if (non_ascii) {
+    if (!verify_utf8(x, len)) {
+      WARN_ONCE("String is not valid UTF-8, returning raw instead.");
+      return 0; 
+    }
+  }
+  return 1;
+}
+
+
 double i64_to_double(int64_t x) {
   double xx = x;
   if ((int64_t)xx != x) {
     WARN_ONCE("Cast of integer %" PRId64 " to double loses precision", x);
-  }
+  };
   return xx;
 }
 

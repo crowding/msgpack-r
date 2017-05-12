@@ -18,7 +18,8 @@ void pack_raw(cw_pack_context *, SEXP);
 SEXP current = NULL;
 int current_index = 0;
 
-SEXP _packb(SEXP input) {
+
+SEXP _packb(SEXP input, SEXP compatible) {
   cw_pack_context cxt;
 
   if (current != NULL) {
@@ -31,7 +32,7 @@ SEXP _packb(SEXP input) {
   PROTECT_WITH_INDEX(current = allocVector(RAWSXP, len), &current_index);
   
   cw_pack_context_init(&cxt, RAW(current), len, &handle_overflow);
-  cw_pack_set_compatibility(&cxt, FALSE);
+  cw_pack_set_compatibility(&cxt, asLogical(compatible));
 
   pack_sexp(&cxt, input);
   

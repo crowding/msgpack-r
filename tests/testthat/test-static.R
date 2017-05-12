@@ -78,7 +78,7 @@ test_that("unpack large ints to float", {
   not_na_float = -2147483648
   expect_warning(unpackb(bigint) %is% bigfloat, "precision")
   unpackb(negint) %is% negfloat
-  unpackb(not_na) %is% not_nafloat
+  unpackb(not_na) %is% not_na_float
   #
   # and all in a vector...
   expect_warning(
@@ -135,18 +135,34 @@ test_that("NA and NaN are distinct doubles,", {
 
 
 test_that("compatibility mode", {
-  packb(as.raw(c(1, 2, 3))) %is% as.raw(c(0x0))
-  packb(as.raw(c("abc")), compatible=TRUE) %is% as.raw(c(0xa3, 0x01, 0x02, 0x03))
+  packb(as.raw(c(1, 2, 3))) %is% as.raw(c(0xc4, 0x03, 0x01, 0x02, 0x03))
+  packb(as.raw(c(1, 2, 3)), compatible=TRUE) %is% as.raw(c(0xa3, 0x01, 0x02, 0x03))
 })
 
 
-test_that("Unpackb: detect bad strings and return raw instead", {
+test_that("Unpackb: detect bad strings, warn, and return raw", {
+
   expect_warning(expect_equal(unpackb(as.raw(c(0xa3, 0x00, 0x62, 0x63))),
                               as.raw(c(0x00, 0x62, 0x63))),
-                 "null")
+                 "nul")
 
+  #and check for malformed UTF8
+  #3 byte sequence with last continuation byte missing
+  expect_warning(expect_equal(unpackb(as.raw(c(0xa2, 0x30, 0x80))),
+                              as.raw(c(0x30, 0x80))),
+                 "UTF")
+
+  #2 bytes of 3 byte sequence followed by space
+  expect_warning(expect_equal(unpackb(as.raw(c(0xa3, 0x30, 0x80, 0x20))),
+                              as.raw(c(0x30, 0x80, 0x20))),
+                 "UTF")
+
+  # illegal byte
+  expect_warning(expect_equal(unpackb(as.raw(c(0xa1, 0xff))),
+                              as.raw(c(0xff))),
+                 "UTF")
   #also for malformed UTF8?
-  stop("Not written")
+
 })
 
 test_that("always emit strings in UTF8 encoding", {
