@@ -25,6 +25,7 @@ pack_rt <- function (start, cmp) {
   expect_equivalent(start, end)
 }
 
+
 test_that("pack singletons", {
   #null
   pack_rt(NULL, as.raw(0xc0)) #NA is encoded as null?
@@ -61,7 +62,7 @@ test_that("pack singletons", {
           as.raw(c(0xa5, 0x68, 0x65, 0x6c, 0x6c, 0x6f)))
 
   # raw character
-   pack_rt(as.raw(0xab),
+  pack_rt(as.raw(0xab),
           as.raw(c(0xc4, 0x01, 0xab)))
 
   packb(NA_character_)  %is% as.raw(0xc0) #does not round trip
@@ -78,6 +79,8 @@ test_that("unpack large ints to float", {
   expect_warning(unpackb(bigint) %is% float, "precision")
   unpackb(negint) %is% negfloat
   unpackb(not_na) %is% not_nafloat
+  #
+  # and all in a vector...
   unpackb(c(as.raw(0x93), bigint, negint, not_na)) %is% c(float, negfloat, not_na_float)
 })
 
@@ -98,13 +101,14 @@ test_that("Pack lists", {
   roundtrip(list("a", list("b", 4)))
 })
 
+
 test_that("unpack simplified vectors", {
     roundtrip(c(FALSE, NA)) #bool
     roundtrip(list(FALSE, 3L)) #list; don't coerce logicals (that aren't all NA)
     roundtrip(c(1L, NA)) #integer
     roundtrip(c(1L, NA, 1.0)) #real
     roundtrip(c("hello", NA)) #string
-    roundtrip(list(1L, 1.0, "hi")) #list, don't coerce to char
+    roundtrip(list(1L, 2L, "hi")) #list, don't coerce to char
     roundtrip(list(c(1,2), c("hi", "bye"))) #list
 })
 
@@ -152,6 +156,10 @@ test_that("not simplifying", {
 })
 
 
+test_that("customize treatment of nil values", {
+ stop("not written")
+})
+
 test_that("Homepage example", {
   pack_rt(list(compact=TRUE, schema=0),
           c(as.raw(c(0x82, 0xa7)),
@@ -161,10 +169,16 @@ test_that("Homepage example", {
             as.raw(00)))
 })
 
+
 test_that("extension data types", {
   stop("not written")
 })
 
+
 test_that("recursion not allowed", {
   stop("not written")
 });
+
+## Local Variables:
+## ess-r-package-info: ("msgpackr" . "~/msgpackr/")
+## End:

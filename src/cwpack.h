@@ -113,7 +113,7 @@ typedef enum
 typedef struct {
     const void*     start;
     uint32_t        length;
-} cwpack_blob;
+} cwpack_blob; 
 
 
 typedef struct {

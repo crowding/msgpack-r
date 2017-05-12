@@ -2,26 +2,16 @@
 #include "cwpack.h"
 #include "vadr.h"
 
-
-SEXP _unpackb(SEXP, SEXP, SEXP, SEXP, SEXP);
+SEXP _unpackb(SEXP);
 
 SEXP extract_value(cw_unpack_context *);
 void cw_unpack_next_or_fail(cw_unpack_context *);
 SEXP make_sexp_from_context(cw_unpack_context *);
 SEXP extract_simplified_vector(cw_unpack_context *cxt);
 
-SEXP continue_as_na(
-  cw_unpack_context *cxt, SEXP, unsigned long, unsigned long, PROTECT_INDEX *);
-SEXP coerce_and_continue(
-  cw_unpack_context *cxt, SEXP, unsigned long, unsigned long, PROTECT_INDEX *);
-SEXP continue_as_logical(
-  cw_unpack_context *, SEXP, unsigned long, unsigned long, PROTECT_INDEX *);
-SEXP continue_as_integer(
-  cw_unpack_context *, SEXP, unsigned long, unsigned long, PROTECT_INDEX *);
-SEXP continue_as_list(
-  cw_unpack_context *, SEXP, unsigned long, unsigned long, PROTECT_INDEX *);
-SEXP coerce_to_list_and_continue(
-  cw_unpack_context *, SEXP, unsigned long, unsigned long, PROTECT_INDEX *);
+SEXP fill_vector(cw_unpack_context *, SEXP, uint32_t, PROTECT_INDEX);
+
+SEXP coerce(SEXP, SEXPTYPE);
 
 const char *decode_return_code(int);
 const char *decode_item_type(cwpack_item_types);
@@ -29,13 +19,25 @@ const char *decode_item_type(cwpack_item_types);
 double i64_to_double(int64_t x);
 double u64_to_double(uint64_t x);
 
-SEXP _unpackb(SEXP dat, SEXP warn, SEXP use_envs, SEXP simplify, SEXP nil) {
+SEXPTYPE type_to_sexptype(int t);
+
+static int depth = 0;
+
+#define LOG(FMT, ...)                                                   \
+  Rprintf("%.*s %s: " FMT,                                              \
+          MIN (depth, 40), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>!",  \
+          __FUNCTION__,                                                 \
+          ## __VA_ARGS__)
+
+
+SEXP _unpackb(SEXP dat) {
   assert_type(dat, RAWSXP);
   cw_unpack_context cxt;
   cw_unpack_context_init(&cxt, RAW(dat), LENGTH(dat), 0);
 
+  depth = 0;
+  
   SEXP out = extract_value(&cxt);
-
   return out;
 }
 
@@ -47,15 +49,14 @@ SEXP extract_value(cw_unpack_context *cxt) {
 
 
 void cw_unpack_next_or_fail(cw_unpack_context *cxt) {
-   cw_unpack_next(cxt);
-   if (cxt->return_code != CWP_RC_OK) {
-     error("Error encountered during unpacking: %s",
-           decode_return_code(cxt->return_code));
-   };
+  cw_unpack_next(cxt);
+  if (cxt->return_code != CWP_RC_OK) {
+    error("Error encountered during unpacking: %s",
+          decode_return_code(cxt->return_code));
+  };
  }
 
-/* TODO remove this duplication; just make a single-element vector and
-  continue as vector */
+
 SEXP make_sexp_from_context(cw_unpack_context *cxt) {
   LOG("Making sexp from a %s\n", decode_item_type(cxt->item.type));
 
@@ -66,31 +67,8 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
   case CWP_ITEM_BOOLEAN:
     return ScalarLogical(cxt->item.as.boolean);
 
-  case CWP_ITEM_NEGATIVE_INTEGER:
-    if (cxt->item.as.i64 == NA_INTEGER
-        || cxt->item.as.i64 < INT_MIN) {
-      return ScalarReal(i64_to_double(cxt->item.as.u64));
-    } else {
-      return ScalarInteger(cxt->item.as.u64);
-    }
-    break;
-
-  case CWP_ITEM_POSITIVE_INTEGER:
-    if (cxt->item.as.u64 > UINT_MAX) {
-      return ScalarReal(u64_to_double(cxt->item.as.u64));
-    } else {
-      return ScalarInteger(cxt->item.as.u64);
-    }
-    break;
-
-  case CWP_ITEM_FLOAT:
-    return ScalarReal(cxt->item.as.real);
-
-  case CWP_ITEM_DOUBLE:
-    return ScalarReal(cxt->item.as.long_real);
-
-  case CWP_ITEM_STR:
-    return ScalarString(mkCharLen(cxt->item.as.str.start, cxt->item.as.str.length));
+  case CWP_ITEM_ARRAY:
+    return extract_simplified_vector(cxt);
 
   case CWP_ITEM_BIN:
     {
@@ -101,8 +79,20 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
       return out;
     }
 
-  case CWP_ITEM_ARRAY:
-    return extract_simplified_vector(cxt);
+  case CWP_ITEM_NEGATIVE_INTEGER:
+  case CWP_ITEM_POSITIVE_INTEGER:
+  case CWP_ITEM_FLOAT:
+  case CWP_ITEM_DOUBLE:
+  case CWP_ITEM_STR: {
+    SEXP buf;
+    PROTECT_INDEX ix;
+
+    PROTECT_WITH_INDEX(buf = allocVector(type_to_sexptype(cxt->item.type), 1),
+                       &ix);
+    buf = fill_vector(cxt, buf, 1, ix);
+    UNPROTECT(1);
+    return buf;
+  }
 
   case CWP_ITEM_MAP:
     error("map not handled");
@@ -119,38 +109,51 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
 }
 
 
+SEXP _wtf() {
+  int len = 2;
+
+  SEXP buf;
+  SEXPTYPE type = REALSXP;
+  int ix;
+  LOG("Allocating %s vector of length %d\n", type2char(type), len);
+  PROTECT_WITH_INDEX(
+                     buf = allocVector(type, len),
+                     &ix);
+  LOG("Protection index %d\n", ix);
+    
+  for(int i = 0; i < len; i++) {
+    LOG("Filling item %d\n", i);
+    REAL(buf)[i] = NA_REAL;
+  }
+  LOG("filled out a a %s\n", type2char(TYPEOF(buf)));
+  LOG("That is, I filled out a a %s\n", type2char(TYPEOF(buf)));
+  
+  UNPROTECT(1);
+  return buf;
+}
+
 
 SEXP extract_simplified_vector(cw_unpack_context *cxt) {
-  ASSERT2(cxt->item.type == CWP_ITEM_ARRAY, "extract_simplified_vector");
-  /* start with the first item */
-  int len = cxt->item.as.array.size;
+  ASSERT(cxt->item.type == CWP_ITEM_ARRAY);
+  uint32_t len = cxt->item.as.array.size;
   LOG("Extracting array of %d elements, simplifying\n", len);
   SEXP buf;
+  PROTECT_INDEX ix;
+
+  /* Peek at the first item, allocate a buffer */
   if (len > 0) {
-    PROTECT_INDEX ix;
     cw_unpack_next_or_fail(cxt);
     LOG("first is a %s\n", decode_item_type(cxt->item.type));
 
-    switch(cxt->item.type) {
+    SEXPTYPE type = type_to_sexptype(cxt->item.type);
+    LOG("Allocating %s vector of length %d\n", type2char(type), len);
+    PROTECT_WITH_INDEX(
+      buf = allocVector(type, len),
+      &ix);
+    LOG("Protection index %d\n", ix);
+    
+    buf = fill_vector(cxt, buf, len, ix);
 
-    case CWP_ITEM_NIL:
-      PROTECT_WITH_INDEX(buf = allocVector(LGLSXP, len), &ix);
-      buf = continue_as_na(cxt, buf, 0, len, &ix);
-    case CWP_ITEM_BOOLEAN:
-      PROTECT_WITH_INDEX(buf = allocVector(LGLSXP, len), &ix);
-      buf = continue_as_logical(cxt, buf, 0, len, &ix);
-      break;
-
-    case CWP_ITEM_POSITIVE_INTEGER:
-    case CWP_ITEM_NEGATIVE_INTEGER:
-      PROTECT_WITH_INDEX(buf = allocVector(INTSXP, len), &ix);
-      buf = continue_as_integer(cxt, buf, 0, len, &ix);
-      break;
-
-    default:
-      PROTECT_WITH_INDEX(buf = allocVector(VECSXP, len), &ix);
-      buf = continue_as_list(cxt, buf, 0, len, &ix);
-    }
   } else { /* len == 0 */
     PROTECT(buf = allocVector(LGLSXP, 0));
   }
@@ -160,203 +163,170 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
 }
 
 
-SEXP continue_as_na(cw_unpack_context *cxt,
-                    SEXP buf,
-                    unsigned long i,
-                    unsigned long len,
-                    PROTECT_INDEX *ix) {
-  /* if we've only seen NA, we have no idea what type we'll end up with,
-     so keep options open. */
-  assert_type3(buf, LGLSXP, "continue_as_na");
-  LOG("Continuing as NA (logical) vector\n");
-
-  while (i < len) {
-    LOG("Item %d is a %s\n", i, decode_item_type(cxt->item.type));
-    switch(cxt->item.type) {
-
-    case CWP_ITEM_NIL:
-      LOGICAL(buf)[i] = NA_LOGICAL;
-      break;
-
-    case CWP_ITEM_BOOLEAN:
-      buf = continue_as_logical(cxt, buf, i, len, ix);
-      break;
-
-    case CWP_ITEM_POSITIVE_INTEGER:
-    case CWP_ITEM_NEGATIVE_INTEGER:
-      buf = coerce_and_continue(cxt, buf, i, len, ix);
-      break;
-
-    default:
-      buf = coerce_to_list_and_continue(cxt, buf, i, len, ix);
-    }
-    if (++i < len) cw_unpack_next_or_fail(cxt);
-  }
-  return buf;
+SEXP coerce(SEXP buf, SEXPTYPE type) {
+  LOG("Coercing %s to %s\n", type2char(TYPEOF(buf)), type2char(type));
+  return coerceVector(buf, type);
 }
 
 
-SEXP continue_as_logical(cw_unpack_context *cxt,
-                         SEXP buf,
-                         unsigned long i,
-                         unsigned long len,
-                         PROTECT_INDEX *ix) {
-  assert_type3(buf, LGLSXP, "continue_as_logical");
-  LOG("Continuing as a logical vector\n");
+SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len, PROTECT_INDEX ix) {
+  int i = 0;
+  depth++;
 
-  // when a "continue_*" is called, there is already an item in context
-  // that needs to be handled. thus the ugly forloop spec:
-  while(i < len) {
-    LOG("Item %d is a %s\n", i, decode_item_type(cxt->item.type));
+  /* when called, we have an item loaded and ready for us in cxt. */
 
-    switch(cxt->item.type) {
+  int non_null_seen = 0;
+  
+  while(1) {
+  UNPACK_VALUE:
+    LOG("Packing item %d into a %s\n", i, type2char(TYPEOF(buf)));
+    LOG("It's a %s\n", decode_item_type(cxt->item.type));
 
-    case CWP_ITEM_NIL:
-      LOGICAL(buf)[i] = NA_LOGICAL;
-      break;
+    switch (TYPEOF(buf)) {
 
-    case CWP_ITEM_BOOLEAN:
-      LOGICAL(buf)[i] = (cxt->item.as.boolean ? TRUE : FALSE);
-      break;
+    case LGLSXP:
 
-    default:
-      buf = coerce_to_list_and_continue(cxt, buf, i, len, ix);
-      break;
-    }
+      switch(cxt->item.type) {
 
-    if (++i < len) cw_unpack_next_or_fail(cxt);
-  }
-  return buf;
-}
+      case CWP_ITEM_NIL:
+        LOGICAL(buf)[i] = NA_LOGICAL;
+        break;
 
-SEXP continue_as_integer(cw_unpack_context *cxt,
-                         SEXP buf,
-                         unsigned long i,
-                         unsigned long len,
-                         PROTECT_INDEX *ix) {
-  assert_type3(buf, INTSXP, "continue_as_integer");
-  LOG("Continuing as an integer vector\n");
+      case CWP_ITEM_BOOLEAN:
+        non_null_seen = 1;
+        LOGICAL(buf)[i] = (cxt->item.as.boolean ? TRUE : FALSE);
+        break;
 
-  while(i < len) {
-    LOG("Item %d is a %s\n", i, decode_item_type(cxt->item.type));
-
-    switch(cxt->item.type) {
-
-    case CWP_ITEM_NIL:
-      INTEGER(buf)[i] = NA_INTEGER;
-      break;
-
-    case CWP_ITEM_BOOLEAN:
-      INTEGER(buf)[i] = (cxt->item.as.boolean ? 1 : 0);
-      break;
-
-    case CWP_ITEM_NEGATIVE_INTEGER:
-      if (cxt->item.as.i64 == NA_INTEGER
-          || cxt->item.as.i64 < INT_MIN) {
-        buf = coerce_and_continue(cxt, buf, i, len, ix);
-      } else {
-        INTEGER(buf)[i] = (cxt->item.as.i64 ? 1 : 0);
+      default:
+        if (non_null_seen) {
+          REPROTECT(buf = coerce(buf, VECSXP), ix);
+        } else {
+          non_null_seen = 1;
+          REPROTECT(buf = coerce(buf, type_to_sexptype(cxt->item.type)), ix);
+        }
+        goto UNPACK_VALUE;
       }
       break;
 
-    case CWP_ITEM_POSITIVE_INTEGER:
-      if (cxt->item.as.u64 > INT_MAX) {
-        buf = coerce_and_continue(cxt, buf, i, len, ix);
-      } else {
-        INTEGER(buf)[i] = (cxt->item.as.u64 ? 1 : 0);
+
+    case INTSXP:
+
+      switch(cxt->item.type) {
+
+      case CWP_ITEM_NIL:
+        INTEGER(buf)[i] = NA_INTEGER;
+        break;
+
+      case CWP_ITEM_NEGATIVE_INTEGER:
+        if (cxt->item.as.i64 == NA_INTEGER
+            || cxt->item.as.i64 < INT_MIN) {
+          REPROTECT(buf = coerce(buf, REALSXP), ix);
+          goto UNPACK_VALUE;
+        } else {
+          INTEGER(buf)[i] = cxt->item.as.i64;
+        }
+        break;
+
+      case CWP_ITEM_POSITIVE_INTEGER:
+        if (cxt->item.as.u64 > INT_MAX) {
+          REPROTECT(buf = coerce(buf, REALSXP), ix);
+          goto UNPACK_VALUE;
+        } else {
+          INTEGER(buf)[i] = cxt->item.as.u64;
+        }
+        break;
+
+      case CWP_ITEM_FLOAT:
+      case CWP_ITEM_DOUBLE:
+        REPROTECT(buf = coerce(buf, REALSXP), ix);
+        goto UNPACK_VALUE;
+
+      default:
+        REPROTECT(buf = coerce(buf, VECSXP), ix);
+        goto UNPACK_VALUE;
       }
+
       break;
 
-    case CWP_ITEM_FLOAT:
-      buf = coerce_and_continue(cxt, buf, 1, len, ix);
+
+    case REALSXP:
+
+      switch(cxt->item.type) {
+
+      case CWP_ITEM_NIL:
+        REAL(buf)[i] = NA_REAL;
+        break;
+
+      case CWP_ITEM_NEGATIVE_INTEGER:
+        REAL(buf)[i] = i64_to_double(cxt->item.as.i64);
+        break;
+
+      case CWP_ITEM_POSITIVE_INTEGER:
+        REAL(buf)[i] = u64_to_double(cxt->item.as.u64);
+        break;
+
+      case CWP_ITEM_FLOAT:
+        REAL(buf)[i] = cxt->item.as.real;
+        break;
+
+      case CWP_ITEM_DOUBLE:
+        REAL(buf)[i] = cxt->item.as.long_real;
+        break;
+
+      default:
+        REPROTECT(buf = coerce(buf, VECSXP), ix);
+        goto UNPACK_VALUE;
+      }
+
+      break;
+
+
+    case STRSXP:
+
+      switch(cxt->item.type) {
+
+      case CWP_ITEM_NIL:
+        SET_STRING_ELT(buf, i, NA_STRING);
+        break;
+
+      case CWP_ITEM_STR:
+        SET_STRING_ELT(buf,
+                       i,
+                       mkCharLen(cxt->item.as.str.start,
+                                 cxt->item.as.str.length));
+        break;
+
+      default:
+        REPROTECT(buf = coerce(buf, VECSXP), ix);
+        goto UNPACK_VALUE;
+      }
+
+      break;
+
+    case VECSXP:
+
+      SET_VECTOR_ELT(buf, i, make_sexp_from_context(cxt));
+
       break;
 
     default:
-      buf = coerce_to_list_and_continue(cxt, buf, i, len, ix);
-      break;
-    }
+      error("Don't know how to fill out a %s (this should not happen)'");
 
-    if (++i < len) cw_unpack_next_or_fail(cxt);
-  }
-  return buf;
-}
+    } /* switch(TYPEOF(buf)) */
 
-SEXP coerce_and_continue(cw_unpack_context *cxt,
-                            SEXP buf,
-                            unsigned long i,
-                            unsigned long len,
-                            PROTECT_INDEX *ix) {
-  error("need to implement coercion");
-  return buf;
-}
-
-
-/* More genericity-via-macros */
-
-#define MAP_TO_LIST(BUF, NEWBUF, ACCESS, NA, BOX, LENGTH) {   \
-    for (int iii = 0; iii < LENGTH; iii++) {                  \
-      if (ACCESS(BUF, iii) == NA)  {                          \
-        LOG("Item %d is NA\n", iii);                          \
-        SET_VECTOR_ELT(NEWBUF, iii, R_NilValue);              \
-      } else {                                                \
-        LOG("Item %d to " #BOX "\n", iii);                    \
-        SET_VECTOR_ELT(NEWBUF, iii, BOX(ACCESS(BUF, iii)));   \
-      }                                                       \
-    }                                                         \
-  }                                                           \
-
-
-SEXP coerce_to_list_and_continue(cw_unpack_context *cxt,
-                                 SEXP buf,
-                                 unsigned long i,
-                                 unsigned long len,
-                                 PROTECT_INDEX *ix) {
-  LOG("Coercing to list from %s\n", type2char(TYPEOF(buf)));
-  SEXP newbuf = PROTECT(allocVector(VECSXP, LENGTH(buf)));
-  switch(TYPEOF(buf)) {
-
-  case LGLSXP:
-    MAP_TO_LIST(buf, newbuf, LOGICAL_ELT, NA_LOGICAL, ScalarLogical, i);
-    break;
-
-  case INTSXP:
-    MAP_TO_LIST(buf, newbuf, INTEGER_ELT, NA_INTEGER, ScalarInteger, i);
-    break;
-
-  case REALSXP:
-    MAP_TO_LIST(buf, newbuf, REAL_ELT, NA_REAL, ScalarReal, i);
-    break;
-
-  case STRSXP:
-    MAP_TO_LIST(buf, newbuf, STRING_ELT, NA_STRING, ScalarString, i);
-    break;
-
-  default:
-    error("Don't know how to turn a %s into a list, at coerce_to_list_and_continue",
-          type2char(TYPEOF(buf)));
-  }
-
-  return continue_as_list(cxt, newbuf, i, len, ix);
-}
-
-
-SEXP continue_as_list(cw_unpack_context *cxt,
-                      SEXP buf,
-                      unsigned long i,
-                      unsigned long len,
-                      PROTECT_INDEX *ix) {
-  assert_type3(buf, VECSXP, "continue_as_list");
-  LOG("Continuing as list\n");
-
-  while (i < len) {
-    SET_VECTOR_ELT(buf, i, make_sexp_from_context(cxt));
-
-    if (++i < len) {
+    i++;
+    if (i < len) {
+      LOG("Unpacking next item\n");
       cw_unpack_next_or_fail(cxt);
-    }
+    } else {
+      break;
+    };
   }
+  LOG("Returning a %s\n", type2char(TYPEOF(buf)));
+  depth--;
   return buf;
 }
+
 
 double i64_to_double(int64_t x) {
   double xx = x;
@@ -374,6 +344,18 @@ double u64_to_double(uint64_t x) {
   return xx;
 }
 
+SEXPTYPE type_to_sexptype(int t) {
+  switch(t) {
+  case CWP_ITEM_NIL:
+  case CWP_ITEM_BOOLEAN: return LGLSXP;
+  case CWP_ITEM_POSITIVE_INTEGER:
+  case CWP_ITEM_NEGATIVE_INTEGER: return INTSXP;
+  case CWP_ITEM_FLOAT:
+  case CWP_ITEM_DOUBLE: return REALSXP;
+  case CWP_ITEM_STR: return STRSXP;
+  default: return VECSXP;
+  }
+}
 
 const char *decode_return_code(int x) {
   switch(x) {
@@ -409,6 +391,15 @@ const char *decode_item_type(cwpack_item_types x) {
   case CWP_ITEM_MAP: return "CWP_ITEM_MAP";
   case CWP_ITEM_EXT: return "CWP_ITEM_EXT";
   case CWP_NOT_AN_ITEM: return "CWP_NOT_AN_ITEM";
-  default: return "???";
+  default:
+    if (x <= CWP_ITEM_MAX_USER_EXT
+        && x >= CWP_ITEM_MIN_USER_EXT) {
+      return "CWP_ITEM_USER_EXT(n)";
+    } else if (x <= CWP_ITEM_MAX_RESERVED_EXT
+               && x >= CWP_ITEM_MIN_RESERVED_EXT) {
+      return "CWP_ITEM_MAX_USER_EXT(n)";
+    } else {
+      return "???";
+    }
   }
 }
