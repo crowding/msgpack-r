@@ -28,8 +28,8 @@ pack_rt <- function (start, cmp, ...) {
 
 test_that("pack singletons", {
   #null
-  pack_rt(NULL, as.raw(0xc0)) #NA is encoded as null?
-  packb(NA) %is% as.raw(0xc0)
+  pack_rt(NA, as.raw(0xc0))
+  packb(NULL) %is% as.raw(0xc0)
 
   #logical
   pack_rt(FALSE, as.raw(0xc2))
@@ -121,7 +121,7 @@ test_that("unpack simplified vectors starting with NA", {
 
 
 test_that("pack zero length vectors", {
-  roundtrip(c())
+  roundtrip(logical(0))
 })
 
 
@@ -228,20 +228,25 @@ test_that("pack named vectors into dicts", {
 })
 
 
-test_that("unpack dicts into envs", {
-  typeof(mode(unpackb(packb(list2env(list(a=1, b=2))))) %is% "list")
+test_that("Unpack dicts into envs", {
+  unpackb(packb(list2env(list(a=1, b=2)))) %is% c(a=1, b=2)
 
   x <- new.env()
-  e <- unpackb(packb(list(a = 1, b = NULL)), x)
+  e <- unpackb(packb(list(a = 1, b = NA)), dict = x)
   typeof(e) %is% "environment"
-  as.list(e) %is% list(a = 1)
+  as.list(e) %is% list(a = 1, b = NA)
   parent.env(e) %is% x
+  unpackb(packb(emptyenv()), dict=emptyenv())
 })
 
 
 test_that("pack envs into sorted dicts", {
   e <- list2env(list(c=3, b=1, d=4, a=2))
   unpackb(packb(e)) %is% c(a=2, b=1, c=3, d=4)
+})
+
+test_that("Unpack dicts into envs", {
+  unpackb(packb(c(a=2, b=1, c=3, d=4)), dict=)
 })
 
 

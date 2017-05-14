@@ -71,7 +71,7 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
 
   switch (cxt->item.type) {
   case CWP_ITEM_NIL:
-    return R_NilValue;
+    return ScalarLogical(NA_LOGICAL);
 
   case CWP_ITEM_BOOLEAN:
     return ScalarLogical(cxt->item.as.boolean);
@@ -148,6 +148,7 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
       cw_unpack_next_or_fail(cxt);
       SEXP name = PROTECT(always_make_charsxp_from_context(cxt));
       SET_STRING_ELT(names, 0, name);
+      UNPROTECT(1);
     }
     cw_unpack_next_or_fail(cxt);
     LOGD("first is a %s", decode_item_type(cxt->item.type));
@@ -365,11 +366,13 @@ SEXP extract_env(cw_unpack_context *cxt) {
   for (int i = 0; i < nkeys; i++) {
     cw_unpack_next_or_fail(cxt);
     SEXP key = PROTECT(always_make_charsxp_from_context(cxt));
-    SEXP sym = PROTECT(installChar(sym));
+    SEXP sym = PROTECT(installChar(key));
     SEXP value = PROTECT(extract_sexp(cxt));
+    LOGD("storing variable `%s` into a %s",
+         CHAR(PRINTNAME(sym)), type2char(TYPEOF(env)));
     
     if (sym == R_MissingArg || sym == R_DotsSymbol || DDVAL(sym)) {
-      WARN_ONCE("Illegal variable name `%s`, discarded", CHAR(PRINTNAME(sym)));
+      WARN_ONCE("Discarding illegal variable name `%s`", CHAR(PRINTNAME(sym)));
     } else {
       defineVar(sym, value, env);
     }
@@ -383,7 +386,9 @@ SEXP extract_env(cw_unpack_context *cxt) {
 SEXP new_env(SEXP parent) {
   ASSERT(TYPEOF(parent) == ENVSXP);
   SEXP call = PROTECT(lang3(install("new.env"), ScalarLogical(TRUE), parent));
-  return eval(call, R_BaseEnv);
+  SEXP x = eval(call, R_BaseEnv);
+  UNPROTECT(1);
+  return x;
 }
 
 

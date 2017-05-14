@@ -145,6 +145,19 @@ void pack_sexp(cw_pack_context* cxt, SEXP dat) {
     case NILSXP:
       cw_pack_nil(cxt); break;
 
+    case ENVSXP:
+      {
+        SEXP args = PROTECT(lang4(install("as.list.environment"),
+                                  dat,
+                                  ScalarLogical(1),
+                                  ScalarLogical(1)));
+        SEXP list = PROTECT(eval(args, R_BaseEnv));
+        unp += 2;
+        SEXP names = getAttrib(list, R_NamesSymbol);
+        pack_named_vector(cxt, list, names);
+        break;
+      }
+
     default:
       cxt->opts.buf = NULL;
       error("can't pack a %s", type2char(TYPEOF(dat)));
