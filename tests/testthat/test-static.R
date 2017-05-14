@@ -1,4 +1,4 @@
- context("msgpackr static API")
+context("msgpackr static API")
 
 `%is%` <- expect_equal
 
@@ -11,7 +11,7 @@ stringToRaw <- function(ch) {
 roundtrip <- function(start) {
   bin <- packb(start)
   end <- unpackb(bin)
-  expect_identical(start, end)
+  expect_equal(start, end)
   bin
 }
 
@@ -42,17 +42,10 @@ test_that("pack singletons", {
   #32 bit ints
   pack_rt(2147483647L, as.raw(c(0xCE, 0x7f, 0xff, 0xff, 0xff)))
 
-  # cwpack will use 32 bit float if precision is preserved.
-  # float32 representation of 5:
-  # 5 = 1.25 * 2^2
-  #   = +1 * 2 ^  (129 - 127) * (1 + 0.25)
-  #     ^sign      ^exponent     ^mantissa
-  #     0          10000001         010000000000000000000000
-  # 01000000 10100000 00000000 00000000
-  # 40 A0 00 00
-  pack_rt(5, as.raw(c(0xCA, 0x40, 0xA0, 0x00, 0x00)))
+  # cwpack will use 32 bit float if precision is preserved. For example, Inf:
+  pack_rt(Inf, as.raw(c(0xca, 0x7f, 0x80, 0x00, 0x00)))
 
-  # float64:
+  # and a float64:
   x <- 1.7976931348623157e308 # .Machine$double.xmax
   # 0 11111111110 1111111111111111111111111111111111111111111111111111
   pack_rt(x, as.raw(c(0xCB, 0x7F, 0xEF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF)))
@@ -61,13 +54,16 @@ test_that("pack singletons", {
   pack_rt("hello",
           as.raw(c(0xa5, 0x68, 0x65, 0x6c, 0x6c, 0x6f)))
 
-  # raw character
+  # raw bytes
   pack_rt(as.raw(0xab),
           as.raw(c(0xc4, 0x01, 0xab)))
 
-  packb(NA_character_)  %is% as.raw(0xc0) #does not round trip
+  #NAs and NULL all collapse to nil
+  packb(NA_character_) %is% as.raw(0xc0)
+  packb(NA_real_) %is% as.raw(0xc0)
+  packb(NA_integer_) %is% as.raw(0xc0)
+  packb(NULL) %is% as.raw(0xc0)
 })
-
 
 test_that("unpack large ints to float", {
   bigint = as.raw(c(0xcf, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01))
@@ -129,6 +125,33 @@ test_that("pack zero length vectors", {
 })
 
 
+test_that("packing overflow handler works", {
+  expect_true(length(packb(1:10000)) > 1000)
+})
+
+test_that("extension mechanism", {
+  obj <- c(1, 2, 3)
+  class(obj) <- c("reverse")
+  assign(envir = globalenv(), "prepack.reverse", function(x) rev(x))
+  unpackb(packb(obj)) %is% c(3, 2, 1)
+})
+
+
+test_that("recursive use of msgpack works", {
+  assign(envir = globalenv(), "prepack.blob", function(x) packb(unclass(x)))
+
+  obj <- "hello"
+  class(obj) <- "blob"
+  typeof(unpackb(packb(obj))) %is% "raw"
+})
+
+
+test_that("Max buffer size", {
+  packb(300:400, max_size=306)
+  expect_error(packb(300:401, max_size=306), "overflow")
+})
+
+
 test_that("NA and NaN are distinct doubles,", {
   roundtrip(c(NA, NaN))
 })
@@ -171,34 +194,64 @@ test_that("always emit strings in UTF8,", {
   packb(x) %is% as.raw(c(0xa7, 0x66, 0x61, 0xc3, 0xa7, 0x69, 0x6c, 0x65))
 })
 
-test_that("as_is: use arrays even for singletons", {
-  packb(list(1, 2, 3)) %is% as.raw(0x00)
-  packb(list(1, 2, 3), as_is=TRUE) %is% as.raw(0x00)
-  packb(I(list(1, 2, 3))) %is% as.raw(0x00)
+test_that("use ints for integral floats under 32 bits", {
+  packb(1) %is% packb(1L)
+
+  length(packb(2^32)) %is% 5
+  length(packb(2^32+1)) %is% 9
+  length(packb(-2^31)) %is% 5
+  length(packb(-2^31-1)) %is% 9
 })
 
 
-test_that("packing overflow handler works", {
-  expect_true(length(packb(1:10000)) > 1000)
+test_that("as_is uses arrays even for singletons", {
+  length(packb(1)) %is% 1
+  length(packb(1, as_is=TRUE)) %is% 2
+  length(packb(list(1, 2, 3))) %is% 4
+  length(packb(list(1, 2, 3), as_is = TRUE)) %is% 7
+  unpackb(packb(list(1, 2, 3))) %is% c(1, 2, 3)
+  unpackb(packb(list(1, 2, 3), as_is = TRUE)) %is% list(1, 2, 3)
+
+  length(packb(I(1), as_is=FALSE)) %is% 2
 })
+
+
+test_that( "single row data frames also pack with asIs", {
+  expect_true(  length(packb(data.frame( a=1, b=2)))
+              > length(packb(list(a=1, b=2))))
+})
+
 
 test_that("pack named vectors into dicts", {
-  packb(list(a=1, b=NULL)) %is% as.raw(c(0x00))
-  packb(list(a=1, b=NULL), dict=FALSE) %is% as.raw(c(0x00))
+  unpackb(packb(list(a=1, b=NULL))) %is% c(a=1, b=NA)
+  unpackb(packb(list(a=1, b=NULL), use_dict=FALSE)) %is% c(1, NA)
 })
 
+
 test_that("unpack dicts into envs", {
-  e = unpackb(packb(list(a=1, b=NULL)), envs=TRUE)
+  typeof(mode(unpackb(packb(list2env(list(a=1, b=2))))) %is% "list")
+
+  x <- new.env()
+  e <- unpackb(packb(list(a = 1, b = NULL)), x)
   typeof(e) %is% "environment"
-  e$a %is% 1
-  e$b %is% NULL
-  e = unpackb(packb(list(a=1, b=NULL)), envs=FALSE)
-  typeof(e) %is% "list"
-  class
-  typeof(mode(unpack(pack(as.evironment(list(a=1, b=2))))) %is% "list")
-  typeof(mode(unpack(pack(as.evironment(list(a=1, b=2))))) %is% "list")
-    mode(unpack(pack(as.evironment(list(a=1, b=2))))) %is% "list"
-  class(unpack(pack(x)))
+  as.list(e) %is% list(a = 1)
+  parent.env(e) %is% x
+})
+
+
+test_that("pack envs into sorted dicts", {
+  e <- list2env(list(c=3, b=1, d=4, a=2))
+  unpackb(packb(e)) %is% c(a=2, b=1, c=3, d=4)
+})
+
+
+test_that("detect data frames", {
+  expect_true(is.data.frame(unpackb(packb(data.frame(a=1, b=2)))))
+})
+
+
+test_that("Raw with names", {
+  expect_warning(packb(structure(as.raw(c(1,2)), names=c("a", "b"))))
 })
 
 
@@ -223,14 +276,10 @@ test_that("Homepage example", {
 })
 
 
-test_that("extension data types", {
-  stop("not written")
+test_that("over 2GB output?", {
+  stop("not written");
 })
 
-
-test_that("packing recursion not allowed (or is)", {
-  stop("not written")
-});
 
 ## Local Variables:
 ## ess-r-package-info: ("msgpackr" . "~/msgpackr/")

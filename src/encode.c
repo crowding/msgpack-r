@@ -1,13 +1,13 @@
 #include "cwpack.h"
 #include "vadr.h"
 
-void pack_sexp(cw_pack_context* cxt, SEXP input);
 int handle_overflow(cw_pack_context *, unsigned long);
 SEXP copy_to_new_raw(SEXP, unsigned long, unsigned long);
 
 void pack_sexp(cw_pack_context *, SEXP);
 void pack_singleton(cw_pack_context *, SEXP);
 void pack_vector(cw_pack_context*, SEXP);
+void pack_named_vector(cw_pack_context*, SEXP, SEXP);
 
 void pack_logical(cw_pack_context *, int);
 void pack_integer(cw_pack_context *, int);
@@ -15,47 +15,68 @@ void pack_real(cw_pack_context *, double);
 void pack_string(cw_pack_context *, SEXP);
 void pack_raw(cw_pack_context *, SEXP);
 
-SEXP current = NULL;
-int current_index = 0;
-
-
-SEXP _packb(SEXP input, SEXP compatible) {
+SEXP _packb(SEXP input, SEXP compatible, SEXP as_is,
+            SEXP prepack, SEXP max_size, SEXP use_dict) {
+  unsigned long len = 256;
   cw_pack_context cxt;
 
-  if (current != NULL) {
-    // hmmmm.
-    current = NULL;
-    error("Recursive use of _packb is not allowed");
+  /* Pack the options structure */
+  cxt.opts.as_is = asLogical(as_is);
+  cxt.opts.max_size = INT_MAX;
+  cxt.opts.package_env = prepack;
+  double max_sized = Rf_asReal(max_size);
+  if (isinf(max_sized)) {
+    cxt.opts.max_size = LONG_MAX;
+  } else {
+    cxt.opts.max_size = max_sized;
   }
-  /* allocate a raw SEXP, set global "current" so that we can reallocate  */
-  unsigned long len = 256;
-  PROTECT_WITH_INDEX(current = allocVector(RAWSXP, len), &current_index);
+  cxt.opts.use_dict = asLogical(use_dict);
   
-  cw_pack_context_init(&cxt, RAW(current), len, &handle_overflow);
+  /* allocate a raw SEXP */
+  PROTECT_WITH_INDEX(cxt.opts.buf = allocVector(RAWSXP, len), &cxt.opts.buf_index);
+  
+  cw_pack_context_init(&cxt, RAW(cxt.opts.buf), len, &handle_overflow);
   cw_pack_set_compatibility(&cxt, asLogical(compatible));
 
   pack_sexp(&cxt, input);
-  
-  SEXP out = current;
-  current = NULL;
-  SETLENGTH(out, (cxt.current - cxt.start) / sizeof(Rbyte));
+
+  if (cxt.return_code != CWP_RC_OK) {
+    error("%s", decode_return_code(cxt.return_code));
+  }
+
+  SETLENGTH(cxt.opts.buf, (cxt.current - cxt.start) / sizeof(Rbyte));
   UNPROTECT(1);
-  return out;
+  return cxt.opts.buf;
 }
 
 int handle_overflow(cw_pack_context *cxt, unsigned long more) {
-  /* allocate a vector twice as big, copy data into the new vector, and update context. */
-  unsigned long newlen = LENGTH(current);
-  unsigned long req = LENGTH(current) + more;
-  while (newlen < req) newlen *= 2;
-  REPROTECT(current = copy_to_new_raw(current, newlen, LENGTH(current)),
-            current_index);
+  /* allocate a vector twice as big, copy data into the new vector,
+     and update context. */
+  unsigned long newlen = LENGTH(cxt->opts.buf);
+  unsigned long req = LENGTH(cxt->opts.buf) + more;
 
+  if (req > cxt->opts.max_size) return CWP_RC_BUFFER_OVERFLOW;
+  
+  while (newlen < req) newlen *= 2;
+  if (newlen > cxt->opts.max_size) {
+    newlen = cxt->opts.max_size;
+  }
+  
+  LOG("%d / %d bytes used, need %d more, resizing to %d\n",
+      cxt->current - cxt->start,
+      LENGTH(cxt->opts.buf),
+      more,
+      newlen);
+
+  REPROTECT(cxt->opts.buf =
+              copy_to_new_raw(cxt->opts.buf, newlen, LENGTH(cxt->opts.buf)),
+            cxt->opts.buf_index);
+  
   // update the context structure to point to the new buf
-  cxt->current = cxt->current - cxt->start + RAW(current);
-  cxt->end = RAW(current) + LENGTH(current) * sizeof(Rbyte);
-  cxt->start = RAW(current);
-  return 1;
+  cxt->current = cxt->current - cxt->start + RAW(cxt->opts.buf);
+  cxt->end = RAW(cxt->opts.buf) + LENGTH(cxt->opts.buf) * sizeof(Rbyte);
+  cxt->start = RAW(cxt->opts.buf);
+  return 0;
 }
 
 SEXP copy_to_new_raw(SEXP from, unsigned long new_len, unsigned long copy_len) {
@@ -66,9 +87,54 @@ SEXP copy_to_new_raw(SEXP from, unsigned long new_len, unsigned long copy_len) {
   return to;
 }
 
+
+int containsString(SEXP cl, const char *ch) {
+  assert_type(cl, STRSXP);
+  SEXP cmp = PROTECT(mkChar(ch));
+  int found = 0;
+  for (int i = 0; i < LENGTH(cl); i++) {
+    if (STRING_ELT(cl, i) == cmp) {
+      found = 1; break;
+    }
+  }
+  UNPROTECT(1);
+  return found;
+}
+
+
 void pack_sexp(cw_pack_context* cxt, SEXP dat) {
+  int as_is_sto = cxt->opts.as_is;
+  int unp = 0;
+
+  /* check for asIs, classes */
+  SEXP cl = getAttrib(dat, R_ClassSymbol);
+  if ((cl) != R_NilValue) {
+    if (containsString(cl, "AsIs")) {
+      cxt->opts.as_is = TRUE;
+    } else {
+      /* Preprocess (unless in the middle of an AsIs) */
+      LOG("Preprocessing a %s of class '%s'\n",
+              type2char(TYPEOF(cxt->opts.package_env)),
+              CHAR(STRING_ELT(cl, 0)));
+      SEXP call = PROTECT(lang2(install("prepack"), dat));
+      dat = PROTECT(eval(call, cxt->opts.package_env));
+      unp += 2;
+      
+      /* Check if the preprocessor gave us an AsIs, but don't
+         preprocess again */
+      cl = getAttrib(dat, R_ClassSymbol);
+      if (cl != R_NilValue && containsString(cl, "AsIs")) {
+        cxt->opts.as_is = TRUE;
+        LOG("Preprocessor returned an AsIs!");
+      }
+    }
+  }
+  
   if (isVector(dat)) {
-    if (LENGTH(dat) == 1) {
+    SEXP names = getAttrib(dat, R_NamesSymbol);
+    if (names != R_NilValue && cxt->opts.use_dict) {
+      pack_named_vector(cxt, dat, names);
+    } else if (LENGTH(dat) == 1 && !cxt->opts.as_is) {
       pack_singleton(cxt, dat);
     } else {
       pack_vector(cxt, dat);
@@ -80,11 +146,14 @@ void pack_sexp(cw_pack_context* cxt, SEXP dat) {
       cw_pack_nil(cxt); break;
 
     default:
-      current = NULL;
+      cxt->opts.buf = NULL;
       error("can't pack a %s", type2char(TYPEOF(dat)));
     }
   }
+  UNPROTECT(unp);
+  cxt->opts.as_is = as_is_sto;
 }
+
 
 void pack_singleton(cw_pack_context *cxt, SEXP dat) {
   switch (TYPEOF(dat)) {
@@ -113,12 +182,12 @@ void pack_singleton(cw_pack_context *cxt, SEXP dat) {
     break;
  
   default:
-    current = NULL;
+    cxt->opts.buf = NULL;
     error("can't pack a singleton %s", type2char(TYPEOF(dat)));
   }
 }
 
-// genericity via macros, oh dear
+// generic for-loop macro
 #define PACK_VECTOR(CXT, X, ACCESSOR, STORE) {     \
     int len = LENGTH(X);                           \
     cw_pack_array_size(cxt, len);                  \
@@ -157,10 +226,57 @@ void pack_vector(cw_pack_context *cxt, SEXP x) {
     break;
 
   default:
-    current = NULL;
+    cxt->opts.buf = NULL;
     error("Don't know how to pack a %s vector", type2char(TYPEOF(x)));
   }
 }
+
+// generic for-loop macro
+#define PACK_NAMED_VECTOR(CXT, X, NAMES, ACCESSOR, STORE) {    \
+    int len = LENGTH(X);                        \
+    cw_pack_map_size(cxt, len);                 \
+    for (int i = 0; i < len; i++) {             \
+      pack_string(CXT, STRING_ELT(NAMES, i));   \
+      STORE(CXT, ACCESSOR(X, i));               \
+    }                                           \
+  }
+
+void pack_named_vector(cw_pack_context *cxt, SEXP x, SEXP names) {
+  ASSERT(isVector(x));
+  
+  switch(TYPEOF(x)) {
+
+  case RAWSXP:
+    WARN_ONCE("Names discarded from raw object");
+    pack_raw(cxt, x);
+    break;
+    
+  case LGLSXP:
+    PACK_NAMED_VECTOR(cxt, x, names, LOGICAL_ELT, pack_logical);
+    break;
+    
+  case INTSXP:
+    PACK_NAMED_VECTOR(cxt, x, names, INTEGER_ELT, pack_integer);
+    break;
+
+  case REALSXP:
+    PACK_NAMED_VECTOR(cxt, x, names, REAL_ELT, pack_real);
+    break;
+
+  case VECSXP:
+    PACK_NAMED_VECTOR(cxt, x, names, VECTOR_ELT, pack_sexp);
+    break;
+
+  case STRSXP:
+    PACK_NAMED_VECTOR(cxt, x, names, STRING_ELT, pack_string);
+    break;
+
+  default:
+    cxt->opts.buf = NULL;
+    error("Don't know how to pack a %s vector", type2char(TYPEOF(x)));
+  }
+}
+
 
 void pack_logical(cw_pack_context *cxt, int x) {
   if (x == NA_LOGICAL) {
@@ -181,8 +297,21 @@ void pack_integer(cw_pack_context *cxt, int x) {
 }
 
 void pack_real(cw_pack_context *cxt, double x) {
-  // Numeric NA and NAN need no handling for reals
-  cw_pack_real(cxt, x);
+  /* save bytes by packing integer if possible. */
+  if (ISNA(x)) {
+    cw_pack_nil(cxt);
+  } else if (ceil(x) == x) {
+    if (x >= 0 && x <= UINT32_MAX) {
+      cw_pack_unsigned(cxt, x);
+    } else if (x < 0 && x >= INT32_MIN) {
+      cw_pack_signed(cxt, x);
+    } else {
+      /* NaN's end up here. */
+      cw_pack_real(cxt, x);
+    }
+  } else {
+    cw_pack_real(cxt, x);
+  }
 }
 
 void pack_string(cw_pack_context *cxt, SEXP x) {

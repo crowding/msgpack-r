@@ -4,7 +4,7 @@
 \alias{packb}
 \title{Encode R data structures in bytes using msgpack.}
 \usage{
-packb(x, compatible = FALSE)
+packb(x, compatible = FALSE, as_is = FALSE)
 }
 \arguments{
 \item{x}{An R object, which can be a vectors, lists, environments,
@@ -27,7 +27,12 @@ vectors are simplified to msgpack scalars.}
 \value{
 An object of class "raw".
 
-Strings are always emitted in UTF-8.
+Strings are always emitted in UTF-8. Integral floating-point values
+may be emitted as integers to save space.
+
+A hook for pre-processing R objects before packing is supported
+as follows: Set the class attribute of an object to \code{c("prepack", "myclass")}, then provide an S3 method for \code{encode.myclass} that
+transforms the object.
 }
 \description{
 Encode R data structures in bytes using msgpack.

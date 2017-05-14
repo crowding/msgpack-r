@@ -14,13 +14,11 @@
 
 #define WARN_ONCE warning
 
-#define LOG(FMT, ...)                                                   \
-  Rprintf("%.*s %s: " FMT,                                              \
-          MIN (depth, 40), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>!", \
-          __FUNCTION__,                                                 \
-          ## __VA_ARGS__)
+#define LOG(FMT, ...) Rprintf(FMT " (%s:%d)\n", ##__VA_ARGS__, __FUNCTION__, __LINE__)
 
 void assert_type(SEXP, SEXPTYPE);
 void assert_type3(SEXP, SEXPTYPE, const char *);
+
+const char *decode_return_code(int);
 
 #endif

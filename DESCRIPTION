@@ -1,8 +1,16 @@
 Package: msgpackr
-Title: R implementation of msgpack, an efficient binary serialization format.
+Title: R implementation of msgpack, a structured data binary
+       serialization format.
 Version: 0.0.0.9000
-Authors@R: person("Peter", "Meilstrup", email = "peter.meilstrup@gmail.com", role = c("aut", "cre"))
-Description: msgpackr
+Authors@R: person("Peter", "Meilstrup", email =
+           "peter.meilstrup@gmail.com", role = c("aut", "cre"))
+Description: Msgpack is a binary data format similar to JSON, useful
+             for storing, transmitting, and interchanging structured
+             data. There are implementations of msgpack for many
+             popular programming languages. Compared to JSON, msgpack
+             uses fewer bytes and is faster to encode and decode. The
+             msgpackr package encodes and decodes msgpack messages,
+             from static data and from sockets and streams.
 Depends:
     R (>= 3.3.1)
 License: MIT
