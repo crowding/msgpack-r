@@ -16,12 +16,12 @@ roundtrip <- function(start) {
 }
 
 
-pack_rt <- function (start, cmp, ...) {
+pack_rt <- function (start, cmp) {
   "Pack and unpack and check that your data made the round trip (as defined by
    expect_equivalent)"
-  bin <- packb(start, ...)
+  bin <- packb(start)
   expect_equal(bin, cmp)
-  end <- unpackb(bin, ...)
+  end <- unpackb(bin)
   expect_equivalent(start, end)
 }
 
@@ -240,10 +240,19 @@ test_that("Unpack dicts into envs", {
 })
 
 
+test_that("non-string dict keys", {
+  d = as.raw(c(0x82, 0xa1, 0x61, 0x01, 0x02, 0x02))
+  expect_warning(unpackb(d) %is% c(a=1, `2`=2), "string")
+  d2 = as.raw(c(as.raw(c(0x82, 0xa1, 0x61, 0x92, 0x01, 0x04, 0x92, 0x02, 0x04, 0x00))))
+  expect_warning(unpackb(d2) %is% list(a=c(1, 4), `c(2, 4)` = 0), "string")
+})
+
+
 test_that("pack envs into sorted dicts", {
   e <- list2env(list(c=3, b=1, d=4, a=2))
   unpackb(packb(e)) %is% c(a=2, b=1, c=3, d=4)
 })
+
 
 test_that("Unpack dicts into envs", {
   unpackb(packb(c(a=2, b=1, c=3, d=4)), dict=)
@@ -252,6 +261,7 @@ test_that("Unpack dicts into envs", {
 
 test_that("detect data frames", {
   expect_true(is.data.frame(unpackb(packb(data.frame(a=1, b=2)))))
+  expect_true(is.data.frame(unpackb(packb(data.frame(a=numeric(0))))))
 })
 
 
@@ -266,11 +276,6 @@ test_that("unpackb refusing to simplify", {
 })
 
 
-test_that("unpack treatment of nil values", {
- stop("not written")
-})
-
-
 test_that("Homepage example", {
   pack_rt(list(compact=TRUE, schema=0),
           c(as.raw(c(0x82, 0xa7)),
@@ -278,11 +283,6 @@ test_that("Homepage example", {
             as.raw(c(0xc3, 0xa6)),
             charToRaw("schema"),
             as.raw(00)))
-})
-
-
-test_that("over 2GB output?", {
-  stop("not written");
 })
 
 

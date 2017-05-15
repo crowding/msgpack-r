@@ -6,8 +6,9 @@ typedef struct unpack_opts {
   int use_df;
   int depth;
   SEXP package;
+  SEXP simplify;
 } unpack_opts;
 
-SEXP _unpackb(SEXP dat, SEXP dict, SEXP use_df, SEXP package);
+SEXP _unpackb(SEXP dat, SEXP dict, SEXP use_df, SEXP package, SEXP simplify);
 
 #endif

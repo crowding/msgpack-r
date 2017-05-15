@@ -36,7 +36,7 @@ const char *decode_item_type(cwpack_item_types);
 
 /* ------------------------------------------------------------ */
 
-SEXP _unpackb(SEXP dat, SEXP dict, SEXP use_df, SEXP package) {
+SEXP _unpackb(SEXP dat, SEXP dict, SEXP use_df, SEXP package, SEXP simplify) {
   assert_type(dat, RAWSXP);
   cw_unpack_context cxt;
   cw_unpack_context_init(&cxt, RAW(dat), LENGTH(dat), 0);
@@ -45,6 +45,7 @@ SEXP _unpackb(SEXP dat, SEXP dict, SEXP use_df, SEXP package) {
   cxt.opts.use_df = asLogical(use_df);
   cxt.opts.depth = 0;
   cxt.opts.package = package;
+  cxt.opts.simplify = asLogical(simplify);
   
   SEXP out = extract_sexp(&cxt);
   return out;
@@ -153,12 +154,16 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
     cw_unpack_next_or_fail(cxt);
     LOGD("first is a %s", decode_item_type(cxt->item.type));
 
-    SEXPTYPE type = type_to_sexptype(cxt->item.type);
-    LOGD("Allocating %s vector of length %d", type2char(type), len);
-    PROTECT_WITH_INDEX(
-      buf = allocVector(type, len),
-      &ix);
-    LOGD("Protection index %d", ix);
+    SEXP type;
+    if (cxt->opts.simplify) {
+      type = type_to_sexptype(cxt->item.type);
+    } else {
+      type = VECSXP;
+    }
+    PROTECT_WITH_INDEX(buf = allocVector(type, len),
+                       &ix);
+    LOGD("Allocated %s vector of length %d, protection id %d",
+         type2char(type), len, ix);
     
     buf = fill_vector(cxt, buf, len, ix, names);
 
@@ -167,7 +172,6 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
   }
 
   if (has_names) {
-    setAttrib(buf, R_NamesSymbol, names);
     UNPROTECT(1);
   }
   
@@ -177,18 +181,45 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
 
 SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
                  PROTECT_INDEX ix, SEXP names) {
-  int i = 0;
   cxt->opts.depth++;
 
-  /* when called, we have an item loaded and ready for us in cxt. */
+  /* when called, we have the first item "primed" for us in cxt. */
 
   int non_null_seen = 0;
-  
-  while(1) {
-  UNPACK_VALUE:
-    LOGD("Unpacking item %d, a %s, into a %s",
-         i, decode_item_type(cxt->item.type), type2char(TYPEOF(buf)));
+  int output_data_frame = ((names != R_NilValue)
+                           && cxt->opts.use_df
+                           && cxt->item.type == CWP_ITEM_ARRAY
+                           && len > 0);
+  long df_rows = 0;
+  if (output_data_frame) {
+    LOGD("Might be a data frame");
+    df_rows = cxt->item.as.array.size;
+  }
+    
+  for (int i = 0; i < len; i++) {                    /* loop once per item read */
+    if (i > 0) {        /* skip what we did when we peeked at first item */
+      if (names != R_NilValue) {
+        LOGD("Reading name %d", i);
+        cw_unpack_next_or_fail(cxt);
+        SEXP c = PROTECT(always_make_charsxp_from_context(cxt));
+        SET_STRING_ELT(names, i, c);
+        UNPROTECT(1);
+      }
 
+      LOGD("Unpacking item %d", i);
+      cw_unpack_next_or_fail(cxt);
+
+      if (output_data_frame
+          && (cxt->item.type != CWP_ITEM_ARRAY
+              || cxt->item.as.array.size != df_rows)) {
+        LOGD("Not a data frame after all");
+        output_data_frame = 0;
+      }
+    }
+
+  UNPACK_VALUE:                 /* goto here to "try again" after coercion */
+    LOGD("Storing item %d, a %s, into a %s",
+         i, decode_item_type(cxt->item.type), type2char(TYPEOF(buf)));
 
     switch (TYPEOF(buf)) {
 
@@ -325,27 +356,26 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
 
       
     default:
-      error("Don't know how to fill out a %s (this should not happen)'");
+      error("Don't know how to fill out a %s (this shouldn't happen)",
+            type2char(TYPEOF(buf)));
 
-    } /* switch(TYPEOF(buf)) */
+    } /* end switch(TYPEOF(buf)) */
     
-    i++;
-    if (i < len) {
+  } /* end for(i = ... */
 
-      if (names != R_NilValue) {
-        LOGD("Reading name %d", i);
-        cw_unpack_next_or_fail(cxt);
-        SEXP c = PROTECT(always_make_charsxp_from_context(cxt));
-        SET_STRING_ELT(names, i, c);
-        UNPROTECT(1);
-      }
-
-      LOGD("Unpacking next item");
-      cw_unpack_next_or_fail(cxt);
-    } else {
-      break;
-    };
+  if (names != R_NilValue) {
+    setAttrib(buf, R_NamesSymbol, names);
   }
+
+  if (output_data_frame) {
+    LOGD("Making a data frame");
+    SEXP call = PROTECT(lang2(install(".set_row_names"), ScalarInteger(df_rows)));
+    SEXP rn = PROTECT(eval(call, R_BaseEnv));
+    setAttrib(buf, R_RowNamesSymbol, rn);
+    setAttrib(buf, R_ClassSymbol, ScalarString(mkChar("data.frame")));
+    UNPROTECT(1);
+  }
+
   LOGD("Returning a %s", type2char(TYPEOF(buf)));
   cxt->opts.depth--;
   return buf;
@@ -415,43 +445,47 @@ SEXP make_raw_from_context(cw_unpack_context *cxt) {
 }
 
 SEXP make_charsxp_or_null(cw_unpack_context *cxt) {
-  ASSERT(cxt->item.type == CWP_ITEM_STR || cxt->item.type == CWP_ITEM_BIN);
-  const char *buf = cxt->item.as.str.start;
-  int len = cxt->item.as.str.length;
-  int non_ascii = 0;
-  
-  for (int i = 0; i < len; i++) {
-    if (buf[i] == 0) {
-      WARN_ONCE("Embedded null in string, returning raw instead.");
-      return R_NilValue;
-    }
-    if (buf[i] & 0x80) {
-      non_ascii = 1;
-    }
-  }
+  if (cxt->item.type == CWP_ITEM_STR || cxt->item.type == CWP_ITEM_BIN) {
+    const char *buf = cxt->item.as.str.start;
+    int len = cxt->item.as.str.length;
+    int non_ascii = 0;
 
-  if (non_ascii) {
-    /* maybe overly paranoid but I didn't see mkCharLenCE doing such
-       verification */
-    if (!verify_utf8(buf, len)) {
-      WARN_ONCE("String is not valid UTF-8, returning raw instead.");
-      return R_NilValue; 
+    for (int i = 0; i < len; i++) {
+      if (buf[i] == 0) {
+        WARN_ONCE("Embedded null in string, returning raw instead.");
+        return R_NilValue;
+      }
+      if (buf[i] & 0x80) {
+        non_ascii = 1;
+      }
     }
-  }
 
-  return mkCharLenCE(buf, len, CE_UTF8);
+    if (non_ascii) {
+      /* maybe overly paranoid but I didn't see mkCharLenCE doing such
+         verification */
+      if (!verify_utf8(buf, len)) {
+        WARN_ONCE("String is not valid UTF-8, returning raw instead.");
+        return R_NilValue; 
+      }
+    }
+
+    return mkCharLenCE(buf, len, CE_UTF8);
+  } else {
+    return R_NilValue;
+  }
 }
-
 
 SEXP always_make_charsxp_from_context(cw_unpack_context *cxt) {
   SEXP x = PROTECT(make_charsxp_or_null(cxt));
   if (x == R_NilValue) {
     WARN_ONCE("Non-string(s) used as keys were coerced to string");
     SEXP item = PROTECT(make_sexp_from_context(cxt));
-    SEXP call = PROTECT(lang2(install("dput"), item));
+    SEXP call = PROTECT(lang2(install("repr"), item));
     SEXP convert = PROTECT(eval(call, cxt->opts.package));
+    LOG("repr returned a %s", type2char(TYPEOF(convert)));
+    SEXP chr = STRING_ELT(convert, 0);
     UNPROTECT(3);
-    return x;
+    return chr;
   } else {
     UNPROTECT(1);
     return x;

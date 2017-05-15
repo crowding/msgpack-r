@@ -43,14 +43,17 @@
 #' dict, it will be converted to string with `dput()`.
 #'
 #' @useDynLib msgpackr _unpackb
+#' @export
 unpackb <- function(x,
                     use_df = TRUE,
-                    dict = c()
-                    # simplify = TRUE,
-                    # transform = NULL,
-                    # dict = emptyenv() or list() or c(),
-                    # nil = NA
-                    # empty = c()
+                    dict = c(),
+                    simplify = TRUE
                    ) {
-  .Call(`_unpackb`, x, dict, use_df, environment())
+  .Call(`_unpackb`, x, dict, use_df, environment(), simplify)
+}
+
+repr <- function(x) {
+  con <- textConnection(NULL, "w")
+  dput(x, con, c("keepNA"))
+  textConnectionValue(con)
 }
