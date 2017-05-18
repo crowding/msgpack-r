@@ -44,14 +44,21 @@
 #'
 #' @useDynLib msgpackr _unpackb
 #' @export
-unpackb <- function(x,
-                    use_df = TRUE,
-                    dict = c(),
-                    simplify = TRUE
-                   ) {
-  .Call(`_unpackb`, x, dict, use_df, environment(), simplify)
+unpackb <- function(x, ...) {
+  .Call(`_unpackb`, x, unpack_opts(...))
 }
 
+#' @useDynLib msgpackr _unpack_opts
+unpack_opts <- function(dict = c(),
+                        use_df = TRUE,
+                        simplify = TRUE) {
+  .Call(`_unpack_opts`, dict,
+        use_df,
+        simplify,
+        parent.env(environment()))
+}
+
+# use dput to come up with a name when a non-string is used as key.
 repr <- function(x) {
   con <- textConnection(NULL, "w")
   dput(x, con, c("keepNA"))

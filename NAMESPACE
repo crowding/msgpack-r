@@ -2,5 +2,8 @@
 
 S3method(prepack,default)
 export(prepack)
+export(unpackb)
+useDynLib(msgpackr,"_pack_opts")
 useDynLib(msgpackr,"_packb")
+useDynLib(msgpackr,"_unpack_opts")
 useDynLib(msgpackr,"_unpackb")

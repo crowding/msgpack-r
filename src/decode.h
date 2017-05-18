@@ -1,14 +1,10 @@
 #ifndef DECODE_H
 #define DECODE_H
 
-typedef struct unpack_opts {
-  SEXP dict;
-  int use_df;
-  int depth;
-  SEXP package;
-  SEXP simplify;
-} unpack_opts;
+#include "vadr.h"
+#include "cwpack.h"
 
-SEXP _unpackb(SEXP dat, SEXP dict, SEXP use_df, SEXP package, SEXP simplify);
+SEXP extract_sexp(cw_unpack_context *);
+int init_unpack_context(cw_unpack_context *, SEXP, SEXP);
 
 #endif

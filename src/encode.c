@@ -5,6 +5,7 @@ int handle_overflow(cw_pack_context *, unsigned long);
 SEXP copy_to_new_raw(SEXP, unsigned long, unsigned long);
 
 void pack_sexp(cw_pack_context *, SEXP);
+
 void pack_singleton(cw_pack_context *, SEXP);
 void pack_vector(cw_pack_context*, SEXP);
 void pack_named_vector(cw_pack_context*, SEXP, SEXP);
@@ -15,70 +16,102 @@ void pack_real(cw_pack_context *, double);
 void pack_string(cw_pack_context *, SEXP);
 void pack_raw(cw_pack_context *, SEXP);
 
-SEXP _packb(SEXP input, SEXP compatible, SEXP as_is,
-            SEXP prepack, SEXP max_size, SEXP use_dict) {
-  unsigned long len = 256;
-  cw_pack_context cxt;
+static long calls = 0;
 
-  /* Pack the options structure */
-  cxt.opts.as_is = asLogical(as_is);
-  cxt.opts.max_size = INT_MAX;
-  cxt.opts.package_env = prepack;
-  double max_sized = Rf_asReal(max_size);
+SEXP _pack_opts(SEXP compatible,
+                SEXP as_is,
+                SEXP use_dict,
+                SEXP max_size,
+                SEXP buf_size,
+                SEXP package) {
+  SEXP optsxp = PROTECT(allocVector(RAWSXP, sizeof(pack_opts)));
+  pack_opts *opts = (pack_opts*)RAW(optsxp);
+  opts->buf = R_NilValue;
+  opts->buf_index = -1;
+  opts->as_is = asLogical(as_is);
+  opts->use_dict = asLogical(use_dict);
+  opts->buf_size = asInteger(buf_size);
+  double max_sized = asInteger(max_size);
   if (isinf(max_sized)) {
-    cxt.opts.max_size = LONG_MAX;
+    opts->max_size = LONG_MAX;
   } else {
-    cxt.opts.max_size = max_sized;
+    opts->max_size = max_sized;
   }
-  cxt.opts.use_dict = asLogical(use_dict);
-  
-  /* allocate a raw SEXP */
-  PROTECT_WITH_INDEX(cxt.opts.buf = allocVector(RAWSXP, len), &cxt.opts.buf_index);
-  
-  cw_pack_context_init(&cxt, RAW(cxt.opts.buf), len, &handle_overflow);
-  cw_pack_set_compatibility(&cxt, asLogical(compatible));
+  opts->compatible = asLogical(compatible);
 
+  opts->package = package;
+  /* also hang onto explicit refs for the SEXP values*/
+  setAttrib(optsxp, install("refs"), CONS(package, R_NilValue));
+  UNPROTECT(1);
+  return optsxp;
+}
+
+            
+int init_pack_context(cw_pack_context *cxt, SEXP opts) {
+  ASSERT(TYPEOF(opts) == RAWSXP && LENGTH(opts) == sizeof(pack_opts));
+  cxt->opts = (pack_opts *) RAW(opts);
+  
+  /* allocate a buffer */
+  PROTECT_WITH_INDEX(cxt->opts->buf = allocVector(RAWSXP, cxt->opts->buf_size),
+                     &cxt->opts->buf_index);
+  cw_pack_context_init(cxt,
+                       RAW(cxt->opts->buf),
+                       LENGTH(cxt->opts->buf),
+                       &handle_overflow);
+  cw_pack_set_compatibility(cxt, cxt->opts->compatible);
+
+  return 1;
+}
+
+            
+SEXP _packb(SEXP input, SEXP opts) {
+  calls++;
+  cw_pack_context cxt;
+  int protections = init_pack_context(&cxt, opts);
+  
   pack_sexp(&cxt, input);
 
   if (cxt.return_code != CWP_RC_OK) {
     error("%s", decode_return_code(cxt.return_code));
   }
 
-  SETLENGTH(cxt.opts.buf, (cxt.current - cxt.start) / sizeof(Rbyte));
-  UNPROTECT(1);
-  return cxt.opts.buf;
+  SETLENGTH(cxt.opts->buf, (cxt.current - cxt.start) / sizeof(Rbyte));
+  UNPROTECT(protections);
+  return cxt.opts->buf;
 }
+
 
 int handle_overflow(cw_pack_context *cxt, unsigned long more) {
   /* allocate a vector twice as big, copy data into the new vector,
      and update context. */
-  unsigned long newlen = LENGTH(cxt->opts.buf);
-  unsigned long req = LENGTH(cxt->opts.buf) + more;
+  unsigned long newlen = LENGTH(cxt->opts->buf);
+  unsigned long req = LENGTH(cxt->opts->buf) + more;
 
-  if (req > cxt->opts.max_size) return CWP_RC_BUFFER_OVERFLOW;
+  if (req > cxt->opts->max_size) return CWP_RC_BUFFER_OVERFLOW;
   
   while (newlen < req) newlen *= 2;
-  if (newlen > cxt->opts.max_size) {
-    newlen = cxt->opts.max_size;
+  if (newlen > cxt->opts->max_size) {
+    newlen = cxt->opts->max_size;
   }
   
   LOG("%d / %d bytes used, need %d more, resizing to %d\n",
       cxt->current - cxt->start,
-      LENGTH(cxt->opts.buf),
+      LENGTH(cxt->opts->buf),
       more,
       newlen);
 
-  REPROTECT(cxt->opts.buf =
-              copy_to_new_raw(cxt->opts.buf, newlen, LENGTH(cxt->opts.buf)),
-            cxt->opts.buf_index);
+  REPROTECT(cxt->opts->buf =
+              copy_to_new_raw(cxt->opts->buf, newlen, LENGTH(cxt->opts->buf)),
+            cxt->opts->buf_index);
   
   // update the context structure to point to the new buf
-  cxt->current = cxt->current - cxt->start + RAW(cxt->opts.buf);
-  cxt->end = RAW(cxt->opts.buf) + LENGTH(cxt->opts.buf) * sizeof(Rbyte);
-  cxt->start = RAW(cxt->opts.buf);
+  cxt->current = cxt->current - cxt->start + RAW(cxt->opts->buf);
+  cxt->end = RAW(cxt->opts->buf) + LENGTH(cxt->opts->buf) * sizeof(Rbyte);
+  cxt->start = RAW(cxt->opts->buf);
   return 0;
 }
 
+            
 SEXP copy_to_new_raw(SEXP from, unsigned long new_len, unsigned long copy_len) {
   assert_type(from, RAWSXP);
   SEXP to = PROTECT(allocVector(RAWSXP, new_len));
@@ -103,28 +136,28 @@ int containsString(SEXP cl, const char *ch) {
 
 
 void pack_sexp(cw_pack_context* cxt, SEXP dat) {
-  int as_is_sto = cxt->opts.as_is;
+  int as_is_sto = cxt->opts->as_is;
   int unp = 0;
 
   /* check for asIs, classes */
   SEXP cl = getAttrib(dat, R_ClassSymbol);
   if ((cl) != R_NilValue) {
     if (containsString(cl, "AsIs")) {
-      cxt->opts.as_is = TRUE;
+      cxt->opts->as_is = TRUE;
     } else {
       /* Preprocess (unless in the middle of an AsIs) */
       LOG("Preprocessing a %s of class '%s'\n",
-              type2char(TYPEOF(cxt->opts.package_env)),
+              type2char(TYPEOF(cxt->opts->package)),
               CHAR(STRING_ELT(cl, 0)));
       SEXP call = PROTECT(lang2(install("prepack"), dat));
-      dat = PROTECT(eval(call, cxt->opts.package_env));
+      dat = PROTECT(eval(call, cxt->opts->package));
       unp += 2;
       
       /* Check if the preprocessor gave us an AsIs, but don't
          preprocess again */
       cl = getAttrib(dat, R_ClassSymbol);
       if (cl != R_NilValue && containsString(cl, "AsIs")) {
-        cxt->opts.as_is = TRUE;
+        cxt->opts->as_is = TRUE;
         LOG("Preprocessor returned an AsIs!");
       }
     }
@@ -132,9 +165,9 @@ void pack_sexp(cw_pack_context* cxt, SEXP dat) {
   
   if (isVector(dat)) {
     SEXP names = getAttrib(dat, R_NamesSymbol);
-    if (names != R_NilValue && cxt->opts.use_dict) {
+    if (names != R_NilValue && cxt->opts->use_dict) {
       pack_named_vector(cxt, dat, names);
-    } else if (LENGTH(dat) == 1 && !cxt->opts.as_is) {
+    } else if (LENGTH(dat) == 1 && !cxt->opts->as_is) {
       pack_singleton(cxt, dat);
     } else {
       pack_vector(cxt, dat);
@@ -159,12 +192,12 @@ void pack_sexp(cw_pack_context* cxt, SEXP dat) {
       }
 
     default:
-      cxt->opts.buf = NULL;
+      cxt->opts->buf = NULL;
       error("can't pack a %s", type2char(TYPEOF(dat)));
     }
   }
   UNPROTECT(unp);
-  cxt->opts.as_is = as_is_sto;
+  cxt->opts->as_is = as_is_sto;
 }
 
 
@@ -195,7 +228,7 @@ void pack_singleton(cw_pack_context *cxt, SEXP dat) {
     break;
  
   default:
-    cxt->opts.buf = NULL;
+    cxt->opts->buf = NULL;
     error("can't pack a singleton %s", type2char(TYPEOF(dat)));
   }
 }
@@ -239,7 +272,7 @@ void pack_vector(cw_pack_context *cxt, SEXP x) {
     break;
 
   default:
-    cxt->opts.buf = NULL;
+    cxt->opts->buf = NULL;
     error("Don't know how to pack a %s vector", type2char(TYPEOF(x)));
   }
 }
@@ -285,7 +318,7 @@ void pack_named_vector(cw_pack_context *cxt, SEXP x, SEXP names) {
     break;
 
   default:
-    cxt->opts.buf = NULL;
+    cxt->opts->buf = NULL;
     error("Don't know how to pack a %s vector", type2char(TYPEOF(x)));
   }
 }

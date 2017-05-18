@@ -4,32 +4,35 @@
 \alias{unpackb}
 \title{Unpack a raw byte object in msgpack format into an R data object.}
 \usage{
-unpackb(x)
+unpackb(x, ...)
 }
 \arguments{
-\item{dat}{\code{\link[base:raw]{base::raw()}} byte data.}
+\item{dat}{\code{\link[base:raw]{base::raw()}} byte data, suck as read from a \code{\link[=make.socket]{make.socket()}} or}
 
 \item{use_env}{if FALSE, msgpack dicts are unpacked into a vector
 or list with a name attribute. If \code{TRUE}, msgpack dicts are
 unpacked into environment objects. Note that this overrides the
 option use_df.}
 
-\item{simplify}{If \code{FALSE}, all msgpack arrays will be unpacked
-into lists. If \code{TRUE}, will produce atomic vectors when possible.}
+\item{array}{Controls how to unpack msgpack arrays. \code{c()}, the
+default, will unpack arrays into the simplest type of
+vector. \code{list()} here will always unpack arrays into lists.}
 
 \item{transform}{A function will be called for each data element.}
 
-\item{dict}{What type of object to produce given a msgpack dict. If
-given an environment (e.g. \code{emptyenv()}, will produce an
-environment with the given parent. If given a vector, will try to
-produce a named list.}
+\item{dict}{Controls how to unpack a msgpack dict. Give en
+environment, such as \code{\link[=emptyenv]{emptyenv()}}, and environments will be
+constructed using the given environment as parent. Otherwise
+dicts will be unpacked into named vectors. Note that unpacking
+into environments precludes \code{use_df}.}
 
-\item{use_df}{If TRUE, msgpack dictionaries whose elements are all
-arrays having the same length are converted to \code{\link[=data.frame]{data.frame()}}s.}
+\item{use_df}{When \code{TRUE}, msgpack dicts, whose elements are all
+arrays having the same length, are converted to \code{\link[=data.frame]{data.frame()}}s.}
 
-\item{nil}{If NA, will represent nil values in msgpack arrays as NA. If
-\code{NULL}, will unpack nil values in arrays as \code{NULL}. If \code{c()},
-will omit null values from arrays.}
+\item{nil}{If NA, will represent msgpack nil values in msgpack
+arrays as NA. If \code{NULL}, will unpack nils as \code{NULL}, upcasting
+primitives to lists in the process. If \code{c()}, will omit null
+values from arrays.}
 }
 \value{
 an R data object.
@@ -37,21 +40,22 @@ an R data object.
 The msgpack format does not have typed arrays, so all msgpack
 arrays are effectively lists from the R perspective. However, if an
 array containing compatibly typed elements is read, \code{unpack} will
-return a logical, integer, real or string vector as
-appropriate. Integer values may be converted to real, but boolean
-values will not be cast to numeric, not any types to string. If
-conversion from a large integer to real loses precision, a warning
-is printed.
+return a logical, integer, real or string vector as appropriate.
+The coercion used is more conservative than R's coercion: Integer
+values may be converted to real, but boolean values will not be
+cast to numeric, nor any types to string. If conversion from a
+large integer to real loses precision, a warning is printed.
 
-Strings are treated as UTF-8. If a msgpack string does not appear
-to be a valid UTF-8 sequence, a warning is printed and a raw object
-is produced instead.
+Msgpack also does not distinguish between \code{NA} and \code{NULL}. The
+argument \code{nil} controls how msgpack nils are unpacked.
 
-Dictionary entries with keys that are other than strings are not
-yet supported. If use
+Strings are read as UTF-8. If a msgpack string does not appear to
+be valid UTF-8, a warning is printed and a raw object is produced
+instead.
 
-If \code{use_env=TRUE} and duplicate names are given in a dictionary, a
-warning is produced and thew duplicate entries are dropped.
+R does not implement vector names or environment keys as anything
+other than string. If a non-string appears as key in a msgpack
+dict, it will be converted to string with \code{dput()}.
 }
 \description{
 Unpack a raw byte object in msgpack format into an R data object.

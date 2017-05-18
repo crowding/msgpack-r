@@ -12,9 +12,15 @@
 #define INTEGER_ELT(O, I) (INTEGER(O)[I])
 #define REAL_ELT(O, I) (REAL(O)[I])
 
-#define WARN_ONCE warning
-
 #define LOG(FMT, ...) Rprintf(FMT " (%s:%d)\n", ##__VA_ARGS__, __FUNCTION__, __LINE__)
+
+#define WARN_ONCE(...) ({                                         \
+      static long last_warned = 0;                                \
+      if (last_warned < calls) {                                  \
+        last_warned = calls;                                      \
+        warning(__VA_ARGS__);                                     \
+      }                                                           \
+    })
 
 void assert_type(SEXP, SEXPTYPE);
 void assert_type3(SEXP, SEXPTYPE, const char *);

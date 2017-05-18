@@ -2,37 +2,57 @@
 % Please edit documentation in R/encode.R
 \name{packb}
 \alias{packb}
+\alias{pack_opts}
 \title{Encode R data structures in bytes using msgpack.}
 \usage{
-packb(x, compatible = FALSE, as_is = FALSE)
+packb(x, ...)
+
+pack_opts(compatible = FALSE, as_is = FALSE, use_dict = TRUE,
+  max_size = NA, buf_size = 512, package)
 }
 \arguments{
-\item{x}{An R object, which can be a vectors, lists, environments,
-and combinations thereof.}
+\item{x}{An R object, which can be null, a vector, list,
+environment, raw, and any combinations thereof.
+
+Strings are always re-encoded to UTF-8. Integral floating-point values
+may be emitted as integers to save space.
+
+A hook for pre-processing R objects before packing is supported, by
+giving the object a \link{class} attribute and implementing a method
+"prepack" for that class. For example, \link{prepack.data.frame(x)}
+simply adds the \link{AsIs} class to \code{x}.  Objects of class \code{AsIs,} and
+their contents, are encoded without using scalars (same as when option
+\code{as_is} is TRUE) and are not further pre-processed.
+
+Dictionary objects are output with the keys in binary sorted order,
+but named vectors are output in the order which they appear.
+
+Object attributes other than \code{name} and \code{class} are ignored.}
+
+\item{...}{Options controlling packing, as described on this page.)}
 
 \item{compatible}{If TRUE, emitted bytes conform to version 1.0 of
 msgpack encoding. This means that msgpack strings are used for
 raw objects.}
 
+\item{as_is}{If TRUE, R vectors of length 1 having no names
+attribute are encoded as msgpack arrays of length 1. Otherwise
+singleton vectors are simplified to msgpack scalars.}
+
+\item{use_dict}{if TRUE, vectors having a "names" attribute are
+encoded as dicts. If false, the names are discarded.}
+
+\item{max_size}{The largest buffer that will be allocated.}
+
+\item{buf_size}{How much memory, in bytes, to allocate for packing
+to be done in vector. There is little reason to change this for
+\code{\link[=unpack]{unpack()}}. For \code{\link[=write_msg]{write_msg()}} it controls how much data is passed
+for each call to \code{\link[=writeBytes]{writeBytes()}}.}
+
 \item{warn}{Whether to emit warnings.}
-
-\item{as.is}{If TRUE, vectors of length 1 having no names attribute
-are encoded as msgpack arrays of length 1. Otherwise singleton
-vectors are simplified to msgpack scalars.}
-
-\item{use.dicts}{if TRUE, vectors having a "names" attribute}
-
-\item{x}{An R object.}
 }
 \value{
 An object of class "raw".
-
-Strings are always emitted in UTF-8. Integral floating-point values
-may be emitted as integers to save space.
-
-A hook for pre-processing R objects before packing is supported
-as follows: Set the class attribute of an object to \code{c("prepack", "myclass")}, then provide an S3 method for \code{encode.myclass} that
-transforms the object.
 }
 \description{
 Encode R data structures in bytes using msgpack.

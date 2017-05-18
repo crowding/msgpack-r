@@ -83,7 +83,6 @@ test_that("unpack large ints to float", {
    "precision")
 })
 
-
 test_that("nice errors from unpack", {
   expect_error(unpackb(as.raw(c(0x92, 0xc0))),
                "end of input")
@@ -147,8 +146,8 @@ test_that("recursive use of msgpack works", {
 
 
 test_that("Max buffer size", {
-  packb(300:400, max_size=306)
-  expect_error(packb(300:401, max_size=306), "overflow")
+  packb(300:400, max_size=306, buf_size=10)
+  expect_error(packb(300:401, max_size=306, buf_size = 10), "overflow")
 })
 
 
@@ -255,26 +254,42 @@ test_that("pack envs into sorted dicts", {
 
 
 test_that("Unpack dicts into envs", {
-  unpackb(packb(c(a=2, b=1, c=3, d=4)), dict=)
+  x <- unpackb(packb(c(a=2, b=1, c=3, d=4)), dict=environment())
+  expect_equal(as.list.environment(x, sorted = TRUE),
+               list(a=2, b=1, c=3, d=4))
 })
 
+test_that("warn bad var names and discard", {
+  b <- packb(c(a=1, 3, b=4))
+  expect_warning(e <- unpackb(b, dict=environment()), "empty")
+  as.list.environment(e, all.names=TRUE, sorted=TRUE) %is% list(a=1, b=4)
+})
+
+test_that("NA names, dots names...", {
+  x <- list(2, "four", rep(1,6), c(), list())
+  n <- c("two", NA, "...", "..5", "")
+  names(x) <- n
+  names(unpackb(packb(x))) %is% n
+
+  expect_warning(e <- unpackb(packb(x), dict=environment()))
+  ls(e, all.names=TRUE) %is% c("NA", "two")
+})
 
 test_that("detect data frames", {
-  expect_true(is.data.frame(unpackb(packb(data.frame(a=1, b=2)))))
-  expect_true(is.data.frame(unpackb(packb(data.frame(a=numeric(0))))))
+  expect_false(is.data.frame(unpackb(packb(list(a=1, b=2)))))
+  expect_true(is.data.frame(unpackb(packb(list(a=1, b=2), as_is=TRUE))))
+  expect_true(is.data.frame(unpackb(packb(list(a=numeric(0))))))
+  expect_false(is.data.frame(unpackb(packb(list(a=c(1, 2, 3), b=c(2, 3))))))
 })
-
 
 test_that("Raw with names", {
   expect_warning(packb(structure(as.raw(c(1,2)), names=c("a", "b"))))
 })
 
-
 test_that("unpackb refusing to simplify", {
   unpackb(packb(list(1, 2))) %is% c(1L, 2L)
   unpackb(packb(list(1, 2)), simplify=FALSE) %is% list(1L, 2L)
 })
-
 
 test_that("Homepage example", {
   pack_rt(list(compact=TRUE, schema=0),
@@ -285,6 +300,9 @@ test_that("Homepage example", {
             as.raw(00)))
 })
 
+test_that("warnings trigger once per message", {
+  length(capture_warnings(unpackb(c(as.raw(0x92), bigint, bigint)))) %is% 1
+})
 
 ## Local Variables:
 ## ess-r-package-info: ("msgpackr" . "~/msgpackr/")

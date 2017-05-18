@@ -1,14 +1,15 @@
+#include "decode.h"
+
 #include <inttypes.h>
-#include "cwpack.h"
-#include "vadr.h"
 #include "utf8.h"
 
-#define LOGD(FMT, ...)                                  \
-  LOG("%.*s " FMT,                                      \
-      MIN (cxt->opts.depth, 40),                        \
-      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>!",       \
-      ##__VA_ARGS__);
 
+#define LOGD(FMT, ...)                                   \
+  LOG("%.*s " FMT,                                       \
+      MIN (cxt->opts->depth, 40),                        \
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>!",        \
+      ##__VA_ARGS__);
+ 
 SEXP extract_sexp(cw_unpack_context *);
 void cw_unpack_next_or_fail(cw_unpack_context *);
 SEXP make_sexp_from_context(cw_unpack_context *);
@@ -26,31 +27,102 @@ SEXP make_raw_from_context(cw_unpack_context *);
 
 SEXP always_make_charsxp_from_context(cw_unpack_context *);
 
-double i64_to_double(int64_t x);
-double u64_to_double(uint64_t x);
+double i64_to_double(cw_unpack_context *, int64_t);
+double u64_to_double(cw_unpack_context *, uint64_t);
 
 SEXPTYPE type_to_sexptype(int t);
  
 const char *decode_item_type(cwpack_item_types);
 
+static long calls = 0;
 
-/* ------------------------------------------------------------ */
+SEXP _unpack_opts(SEXP dict,
+                  SEXP use_df,
+                  SEXP simplify,
+                  SEXP package) {
+  SEXP optsxp = PROTECT(allocVector(RAWSXP, sizeof(unpack_opts)));
+  unpack_opts *opts = (unpack_opts*)(RAW(optsxp));
+  opts->use_df = asLogical(use_df);
+  opts->dict = dict;
+  opts->simplify = asLogical(simplify);
+  opts->package = package;
 
-SEXP _unpackb(SEXP dat, SEXP dict, SEXP use_df, SEXP package, SEXP simplify) {
+  setAttrib(optsxp, install("refs"), CONS(dict, CONS(package, R_NilValue)));
+  UNPROTECT(1);
+  return optsxp;
+}
+
+
+int init_unpack_context(cw_unpack_context *cxt,
+                        SEXP optsxp,
+                        SEXP dat) {
+  assert_type(dat, RAWSXP);
+  assert_type(optsxp, RAWSXP);
+  ASSERT(LENGTH(optsxp) == sizeof(unpack_opts));
+  cw_unpack_context_init(cxt, RAW(dat), LENGTH(dat), 0);  
+  cxt->opts = (unpack_opts *)RAW(optsxp);
+
+  cxt->opts->depth = 0;
+  return 0;
+}
+
+
+SEXP _unpackb(SEXP dat, SEXP opts) {
+  calls++;
   assert_type(dat, RAWSXP);
   cw_unpack_context cxt;
-  cw_unpack_context_init(&cxt, RAW(dat), LENGTH(dat), 0);
-
-  cxt.opts.dict = dict;
-  cxt.opts.use_df = asLogical(use_df);
-  cxt.opts.depth = 0;
-  cxt.opts.package = package;
-  cxt.opts.simplify = asLogical(simplify);
-  
+  init_unpack_context(&cxt, opts, dat);
   SEXP out = extract_sexp(&cxt);
   return out;
 }
 
+
+SEXP _unpack_msgs(SEXP buf, SEXP opts) {
+  cw_unpack_context cxt;
+  int protections = init_unpack_context(&cxt, opts, 0);
+
+  /* start building linkedlist of values */
+  PROTECT_INDEX val_ix;
+  SEXP values;
+  PROTECT_WITH_INDEX(values = R_NilValue, &val_ix);
+  protections++;
+
+  /* remember where current message started */
+  int msg_start = cxt.current - cxt.start;
+  int nmsgs = 0;
+      
+  for (cw_unpack_next(&cxt);
+       cxt.return_code == CWP_RC_OK;
+       nmsgs++, msg_start = cxt.current - cxt.start, cw_unpack_next(&cxt)) {
+      
+      SEXP newval = PROTECT(extract_sexp(&cxt));
+      REPROTECT(values = CONS(newval, values), val_ix);
+      UNPROTECT(1);
+  }
+
+  /* re-pack linked list backwards into array */
+  SEXP msglist = PROTECT(allocVector(VECSXP, nmsgs));
+  protections++;
+  SEXP iter = values;
+  for (int i = nmsgs-1;
+       i >= 0;
+       iter = CDR(iter), i++) {
+      SET_VECTOR_ELT(msglist, i, CAR(iter));
+  }
+
+  /* extract leftover data */
+  int leftover_len = cxt.end - cxt.start - msg_start;
+  SEXP leftovers = PROTECT(allocVector(RAWSXP, leftover_len));
+  protections++;
+  memcpy(RAW(leftovers), cxt.start + msg_start, leftover_len);
+  SEXP return_code = PROTECT(ScalarString(mkChar(decode_return_code(cxt.return_code))));
+  protections++;
+  SEXP output = list3(msglist,
+                      leftovers,
+                      return_code);
+  UNPROTECT(protections);
+  return output;
+}
 
 SEXP extract_sexp(cw_unpack_context *cxt) {
   cw_unpack_next_or_fail(cxt);
@@ -109,7 +181,7 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
   }
 
   case CWP_ITEM_MAP:
-    if (TYPEOF(cxt->opts.dict) == ENVSXP) {
+    if (TYPEOF(cxt->opts->dict) == ENVSXP) {
       return extract_env(cxt);
     } else {
       return extract_simplified_vector(cxt);
@@ -154,8 +226,8 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
     cw_unpack_next_or_fail(cxt);
     LOGD("first is a %s", decode_item_type(cxt->item.type));
 
-    SEXP type;
-    if (cxt->opts.simplify) {
+    SEXPTYPE type;
+    if (cxt->opts->simplify) {
       type = type_to_sexptype(cxt->item.type);
     } else {
       type = VECSXP;
@@ -181,13 +253,13 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
 
 SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
                  PROTECT_INDEX ix, SEXP names) {
-  cxt->opts.depth++;
+  cxt->opts->depth++;
 
   /* when called, we have the first item "primed" for us in cxt. */
 
   int non_null_seen = 0;
   int output_data_frame = ((names != R_NilValue)
-                           && cxt->opts.use_df
+                           && cxt->opts->use_df
                            && cxt->item.type == CWP_ITEM_ARRAY
                            && len > 0);
   long df_rows = 0;
@@ -297,11 +369,11 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
         break;
 
       case CWP_ITEM_NEGATIVE_INTEGER:
-        REAL(buf)[i] = i64_to_double(cxt->item.as.i64);
+        REAL(buf)[i] = i64_to_double(cxt, cxt->item.as.i64);
         break;
 
       case CWP_ITEM_POSITIVE_INTEGER:
-        REAL(buf)[i] = u64_to_double(cxt->item.as.u64);
+        REAL(buf)[i] = u64_to_double(cxt, cxt->item.as.u64);
         break;
 
       case CWP_ITEM_FLOAT:
@@ -377,7 +449,7 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
   }
 
   LOGD("Returning a %s", type2char(TYPEOF(buf)));
-  cxt->opts.depth--;
+  cxt->opts->depth--;
   return buf;
 }
 
@@ -390,23 +462,28 @@ SEXP coerce(SEXP buf, SEXPTYPE type) {
 
 SEXP extract_env(cw_unpack_context *cxt) {
   ASSERT(cxt->item.type == CWP_ITEM_MAP);
-  ASSERT(TYPEOF(cxt->opts.dict) == ENVSXP);
+  ASSERT(TYPEOF(cxt->opts->dict) == ENVSXP);
   int nkeys = cxt->item.as.map.size;
-  SEXP env = PROTECT(new_env(cxt->opts.dict));
+  SEXP env = PROTECT(new_env(cxt->opts->dict));
   for (int i = 0; i < nkeys; i++) {
     cw_unpack_next_or_fail(cxt);
     SEXP key = PROTECT(always_make_charsxp_from_context(cxt));
-    SEXP sym = PROTECT(installChar(key));
     SEXP value = PROTECT(extract_sexp(cxt));
-    LOGD("storing variable `%s` into a %s",
-         CHAR(PRINTNAME(sym)), type2char(TYPEOF(env)));
-    
-    if (sym == R_MissingArg || sym == R_DotsSymbol || DDVAL(sym)) {
-      WARN_ONCE("Discarding illegal variable name `%s`", CHAR(PRINTNAME(sym)));
+    if (LENGTH(key) == 0) {
+      WARN_ONCE("Item with empty name was discarded");
     } else {
-      defineVar(sym, value, env);
+      SEXP sym = PROTECT(installChar(key));
+    
+      if (sym == R_MissingArg || sym == R_DotsSymbol || DDVAL(sym)) {
+        WARN_ONCE("Item with key `%s` was discarded", CHAR(PRINTNAME(sym)));
+      } else {
+        LOGD("storing variable `%s` into a %s",
+             CHAR(PRINTNAME(sym)), type2char(TYPEOF(env)));
+        defineVar(sym, value, env);
+      }
+      UNPROTECT(1);
     }
-    UNPROTECT(3);
+    UNPROTECT(2);
   }
   UNPROTECT(1);
   return env;
@@ -470,6 +547,8 @@ SEXP make_charsxp_or_null(cw_unpack_context *cxt) {
     }
 
     return mkCharLenCE(buf, len, CE_UTF8);
+  } else if (cxt->item.type == CWP_ITEM_NIL) {
+    return NA_STRING;
   } else {
     return R_NilValue;
   }
@@ -478,13 +557,13 @@ SEXP make_charsxp_or_null(cw_unpack_context *cxt) {
 SEXP always_make_charsxp_from_context(cw_unpack_context *cxt) {
   SEXP x = PROTECT(make_charsxp_or_null(cxt));
   if (x == R_NilValue) {
-    WARN_ONCE("Non-string(s) used as keys were coerced to string");
+    WARN_ONCE("Non-string used as key was coerced to string");
     SEXP item = PROTECT(make_sexp_from_context(cxt));
     SEXP call = PROTECT(lang2(install("repr"), item));
-    SEXP convert = PROTECT(eval(call, cxt->opts.package));
+    SEXP convert = PROTECT(eval(call, cxt->opts->package));
     LOG("repr returned a %s", type2char(TYPEOF(convert)));
     SEXP chr = STRING_ELT(convert, 0);
-    UNPROTECT(3);
+    UNPROTECT(4);
     return chr;
   } else {
     UNPROTECT(1);
@@ -493,7 +572,7 @@ SEXP always_make_charsxp_from_context(cw_unpack_context *cxt) {
 }
 
 
-double i64_to_double(int64_t x) {
+double i64_to_double(cw_unpack_context *cxt, int64_t x) {
   double xx = x;
   if ((int64_t)xx != x) {
     WARN_ONCE("Cast of integer %" PRId64 " to double loses precision", x);
@@ -502,7 +581,7 @@ double i64_to_double(int64_t x) {
 }
 
 
-double u64_to_double(uint64_t x) {
+double u64_to_double(cw_unpack_context *cxt, uint64_t x) {
   double xx = x;
   if ((uint64_t)xx != x) {
     WARN_ONCE("Cast of integer %" PRIu64 " to double loses precision", x);
@@ -526,25 +605,24 @@ SEXPTYPE type_to_sexptype(int t) {
 
 const char *decode_item_type(cwpack_item_types x) {
   switch(x) {
-  case CWP_ITEM_NIL: return "CWP_ITEM_NIL";
-  case CWP_ITEM_BOOLEAN: return "CWP_ITEM_BOOLEAN";
-  case CWP_ITEM_POSITIVE_INTEGER: return "CWP_ITEM_POSITIVE_INTEGER";
-  case CWP_ITEM_NEGATIVE_INTEGER: return "CWP_ITEM_NEGATIVE_INTEGER";
-  case CWP_ITEM_FLOAT: return "CWP_ITEM_FLOAT";
-  case CWP_ITEM_DOUBLE: return "CWP_ITEM_DOUBLE";
-  case CWP_ITEM_STR: return "CWP_ITEM_STR";
-  case CWP_ITEM_BIN: return "CWP_ITEM_BIN";
-  case CWP_ITEM_ARRAY: return "CWP_ITEM_ARRAY";
-  case CWP_ITEM_MAP: return "CWP_ITEM_MAP";
-  case CWP_ITEM_EXT: return "CWP_ITEM_EXT";
-  case CWP_NOT_AN_ITEM: return "CWP_NOT_AN_ITEM";
+  case CWP_ITEM_NIL: return "nil";
+  case CWP_ITEM_BOOLEAN: return "boolean";
+  case CWP_ITEM_POSITIVE_INTEGER: return "positive integer";
+  case CWP_ITEM_NEGATIVE_INTEGER: return "negative integer";
+  case CWP_ITEM_FLOAT: return "float";
+  case CWP_ITEM_DOUBLE: return "double";
+  case CWP_ITEM_STR: return "string";
+  case CWP_ITEM_BIN: return "binary";
+  case CWP_ITEM_ARRAY: return "array";
+  case CWP_ITEM_MAP: return "map";
+  case CWP_NOT_AN_ITEM: return "Not an item";
   default:
     if (x <= CWP_ITEM_MAX_USER_EXT
         && x >= CWP_ITEM_MIN_USER_EXT) {
       return "CWP_ITEM_USER_EXT(n)";
     } else if (x <= CWP_ITEM_MAX_RESERVED_EXT
                && x >= CWP_ITEM_MIN_RESERVED_EXT) {
-      return "CWP_ITEM_MAX_USER_EXT(n)";
+      return "CWP_ITEM_RESERVER_EXT(n)";
     } else {
       return "???";
     }

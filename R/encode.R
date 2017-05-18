@@ -1,18 +1,7 @@
 #' Encode R data structures in bytes using msgpack.
 #'
-#' @param x An R object, which can be null, a vector, list, environment, raw,
-#'   and any combinations thereof.
-#' @param compatible If TRUE, emitted bytes conform to version 1.0 of
-#'   msgpack encoding. This means that msgpack strings are used for
-#'   raw objects.
-#' @param as_is If TRUE, R vectors of length 1 having no names
-#'   attribute are encoded as msgpack arrays of length 1. Otherwise
-#'   singleton vectors are simplified to msgpack scalars.
-#' @param max_size The largest buffer that will be allocated.
-#' @param warn Whether to emit warnings.
-#' @param use_dict if TRUE, vectors having a "names" attribute are
-#'   encoded as dicts. If false, the names are discarded.
-#' @return An object of class "raw".
+#' @param x An R object, which can be null, a vector, list,
+#'   environment, raw, and any combinations thereof.
 #'
 #' Strings are always re-encoded to UTF-8. Integral floating-point values
 #' may be emitted as integers to save space.
@@ -29,14 +18,42 @@
 #'
 #' Object attributes other than `name` and `class` are ignored.
 #'
+#' @param ... Options controlling packing, as described on this page.)
 #' @useDynLib msgpackr _packb
-packb <- function(x
-                  , compatible = FALSE
-                  , as_is = FALSE
-                  , max_size = Inf
-                  , use_dict = TRUE
-                  ) {
-  .Call(`_packb`, x, compatible, as_is, environment(), max_size, use_dict)
+packb <- function(x, ...)  {
+  .Call(`_packb`, x, pack_opts(...))
+}
+
+#' @param compatible If TRUE, emitted bytes conform to version 1.0 of
+#'   msgpack encoding. This means that msgpack strings are used for
+#'   raw objects.
+#' @param as_is If TRUE, R vectors of length 1 having no names
+#'   attribute are encoded as msgpack arrays of length 1. Otherwise
+#'   singleton vectors are simplified to msgpack scalars.
+#' @param use_dict if TRUE, vectors having a "names" attribute are
+#'   encoded as dicts. If false, the names are discarded.
+#' @param max_size The largest buffer that will be allocated.
+#' @param buf_size How much memory, in bytes, to allocate for packing
+#'   to be done in vector. There is little reason to change this for
+#'   [unpack()]. For [write_msg()] it controls how much data is passed
+#'   for each call to [writeBytes()].
+#' @param warn Whether to emit warnings.
+#' @return An object of class "raw".
+#' @rdname packb
+#' @useDynLib msgpackr _pack_opts
+pack_opts = function(compatible = FALSE,
+                     as_is = FALSE,
+                     use_dict = TRUE,
+                     max_size = NA,
+                     buf_size = 512,
+                     package) {
+  .Call(`_pack_opts`,
+        compatible,
+        as_is,
+        use_dict,
+        max_size,
+        buf_size,
+        parent.env(environment()))
 }
 
 #' @export

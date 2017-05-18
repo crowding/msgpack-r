@@ -26,8 +26,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "encode.h"
-#include "decode.h"
+#include "opts.h"
+
 
 
 /*******************************   Return Codes   *****************************/
@@ -60,7 +60,7 @@ typedef struct cw_pack_context {
     int                     return_code;
     int                     err_no;          /* handlers can save error here */
     pack_overflow_handler   handle_pack_overflow;
-    pack_opts               opts;
+    pack_opts               *opts;
 } cw_pack_context;
 
 
@@ -152,7 +152,7 @@ typedef struct cw_unpack_context {
     int                         return_code;
     int                         err_no;          /* handlers can save error here */
     unpack_underflow_handler    handle_unpack_underflow;
-    unpack_opts                 opts;
+    unpack_opts                 *opts;
 } cw_unpack_context;
 
 
