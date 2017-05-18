@@ -1,6 +1,7 @@
 #' Unpack a raw byte object in msgpack format into an R data object.
 #'
-#' @param dat [base::raw()] byte data, suck as read from a [make.socket()] or 
+#' @param dat [base::raw()] byte data, such as read from a
+#'   [make.socket()]
 #' @param use_env if FALSE, msgpack dicts are unpacked into a vector
 #'   or list with a name attribute. If `TRUE`, msgpack dicts are
 #'   unpacked into environment objects. Note that this overrides the
@@ -42,16 +43,16 @@
 #' other than string. If a non-string appears as key in a msgpack
 #' dict, it will be converted to string with `dput()`.
 #'
-#' @useDynLib msgpackr _unpackb
+#' @useDynLib msgpackr _unpack_msg
 #' @export
-unpackb <- function(x, ...) {
-  .Call(`_unpackb`, x, unpack_opts(...))
+unpackMsg <- function(x, ...) {
+  .Call(`_unpack_msg`, x, unpackOpts(...))
 }
 
 #' @useDynLib msgpackr _unpack_opts
-unpack_opts <- function(dict = c(),
-                        use_df = TRUE,
-                        simplify = TRUE) {
+unpackOpts <- function(dict = c(),
+                       use_df = TRUE,
+                       simplify = TRUE) {
   .Call(`_unpack_opts`, dict,
         use_df,
         simplify,

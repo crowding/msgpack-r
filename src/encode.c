@@ -64,7 +64,7 @@ int init_pack_context(cw_pack_context *cxt, SEXP opts) {
 }
 
             
-SEXP _packb(SEXP input, SEXP opts) {
+SEXP _pack_msg(SEXP input, SEXP opts) {
   calls++;
   cw_pack_context cxt;
   int protections = init_pack_context(&cxt, opts);

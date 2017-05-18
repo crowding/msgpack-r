@@ -2,12 +2,14 @@ context("unpack from streams")
 
 #most of these tests to be implemented using a raw in-memory connection
 
+`%is%` <- expect_equal
+
 msgs = as.raw(c(0xa5, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
                 0xa3, 0x61, 0x6e, 0x64,
                 0xa7, 0x67, 0x6f, 0x6f))
 
 test_that("consume N messages and return remaining data", {
-  expect_equal(unpack_msgs(x),
+  expect_equal(unpackMsgs(x),
                list(list("hello", "and"),
                     as.raw(c(0xa7, 0x67, 0x6f, 0x6f))))
 
@@ -24,12 +26,12 @@ test_that("consume N messages and return remaining data", {
 
 test_that("consume from a connection (blocking)", {
   conn = rawConnection(msgs, open="r")
-  read_msg(conn) %is% "hello"
-  read_msg(conn) %is% "and"
-  expect_error(read_msg(conn))
+  readMsg(conn) %is% "hello"
+  readMsg(conn) %is% "and"
+  expect_error(readMsg(conn))
 
   conn = rawConnection(msgs, open="r")
-  read_msgs(conn) %is% c("hello", "and")
+  readMsgs(conn) %is% c("hello", "and")
 })
 
 test_that("read from a connection (non-blocking)", {
@@ -56,6 +58,10 @@ test_that("consume non-blocking from a (wrapped) connection", {
 
 test_that("consume partial message non-blocking, then finish", {
   stop("not implemented")
+})
+
+test_that("readMsg/s blocking respects connection blocking", {
+
 })
 
 test_that("respect a max buffer/object size", {

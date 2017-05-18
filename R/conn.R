@@ -1,23 +1,18 @@
-#' Wrap a connection so that it can read or write msgpack objects.
+#' Wrap a connection so that it can read msgpack objects.
 #'
 #' @param conn A connection object that supports readBytes.
-#' @param bufsize The size of the buffer to use to pack objects before sending. Optimise this for speed?
+#' @param max_size The maximum size of an incoming message, in bytes.
+#' @param read_size The default read size.
 #' @param ... Packing options (see pack[])
-#' @return A connection object with "class" and invisibly, the number of bytes written. NULL, invisibly.
-#' @author Peter
-msg_conn <- function(conn, ...) {
-  #keep backlog of partially-parsed bufs....
-  attr(con, "reader") <- reader(conn);
-  class(con) <- c("msg_conn", class(con))
-}
+#' @return An object of class 'msgConnection'
+#' @export
+msgConnection <- function(conn, read_size=NA, max_size=NA, ...) {
 
+  bufstate = "empty"
+  buf = raw(0)
 
-reader <- function(conn, bufsize=NA, ...) {
-  buf <- raw(0)
-
-  unpack <- function(buf) unpackb(buf, ...)
-  read_msgs <- function(n, readsize=NA) {
-    new = readBin(conn, "byte", readsize)
+  readMsgs <- function(n, bytes=read_size) {
+    new = readBin(conn, "byte", bytes)
     if (length(new) > 0) {
       buf <- c(buf, new)
       msgs_bytes <- unpack_msgs(buf)
@@ -25,40 +20,34 @@ reader <- function(conn, bufsize=NA, ...) {
     }
   }
 
-  read_msg <- function() {
-    new <- readBin(conn, "byte", readsize)
-    if (length(new) > 0) {
-      buf <<- c(buf, new)
-      msgs_bytes <- unpack_msgs(buf, ...)
-      new <<- msgs_bytes()
-    }
-  }
-
   partial <- function() buf
+
+  attr(con, "reader") <- environment();
+  class(con) <- c("msgConnection", class(con))
 }
 
-read_msgs <- function(conn, ...) {
-  UseMethod("read_msgs");
+#' @export
+readMsgs <- function(conn, ...) {
+  UseMethod("readMsgs");
 }
 
-read_msgs.connection <- function(conn, ...) {
-  stop("read_msg needs do be called on a msg_conn")
+#' @export
+readMsgs.default <- function(conn, ...) {
+  stop("readMsg() requires a msgConnection()") 
 }
 
-read_msgs.msg_connection <- function(conn, ...) {
+#' @export
+readMsgs.msgConnection <- function(conn, ...) {
   attr(conn, "reader")$read_msgs()
 }
 
-write_msg <- function(obj, conn, ...) {
-  writeBin(packb(obj, ...), conn)
+#' @export
+writeMsg <- function(obj, conn, ...) {
+  writeBin(packMsg(obj, ...), conn)
 }
 
-
-
-write_msg <- function(conn, ...) {
+#' @export
+writeMsg <- function(conn, ...) {
   useMethod("write_msg")
 }
 
-read.msg_stream <- function(conn, ...) {
-  stop("not written");
-}

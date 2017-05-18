@@ -9,7 +9,7 @@
       MIN (cxt->opts->depth, 40),                        \
       ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>!",        \
       ##__VA_ARGS__);
- 
+
 SEXP extract_sexp(cw_unpack_context *);
 void cw_unpack_next_or_fail(cw_unpack_context *);
 SEXP make_sexp_from_context(cw_unpack_context *);
@@ -67,7 +67,7 @@ int init_unpack_context(cw_unpack_context *cxt,
 }
 
 
-SEXP _unpackb(SEXP dat, SEXP opts) {
+SEXP _unpack_msg(SEXP dat, SEXP opts) {
   calls++;
   assert_type(dat, RAWSXP);
   cw_unpack_context cxt;

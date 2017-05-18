@@ -7,10 +7,10 @@
 #' may be emitted as integers to save space.
 #'
 #' A hook for pre-processing R objects before packing is supported, by
-#' giving the object a [class] attribute and implementing a method
-#' "prepack" for that class. For example, [prepack.data.frame(x)]
-#' simply adds the [AsIs] class to `x`.  Objects of class `AsIs,` and
-#' their contents, are encoded without using scalars (same as when option
+#' giving the object an S3 [class] and implementing a method
+#' "prepack". For instance, [prepack.data.frame(x)] simply adds the
+#' [AsIs] class to `x`.  Objects having class `AsIs,` and their
+#' contents, are encoded without using scalars (same as when option
 #' `as_is` is TRUE) and are not further pre-processed.
 #'
 #' Dictionary objects are output with the keys in binary sorted order,
@@ -19,9 +19,10 @@
 #' Object attributes other than `name` and `class` are ignored.
 #'
 #' @param ... Options controlling packing, as described on this page.)
-#' @useDynLib msgpackr _packb
-packb <- function(x, ...)  {
-  .Call(`_packb`, x, pack_opts(...))
+#' @useDynLib msgpackr _pack_msg
+#' @export
+packMsg <- function(x, ...)  {
+  .Call(`_pack_msg`, x, packOpts(...))
 }
 
 #' @param compatible If TRUE, emitted bytes conform to version 1.0 of
@@ -30,7 +31,7 @@ packb <- function(x, ...)  {
 #' @param as_is If TRUE, R vectors of length 1 having no names
 #'   attribute are encoded as msgpack arrays of length 1. Otherwise
 #'   singleton vectors are simplified to msgpack scalars.
-#' @param use_dict if TRUE, vectors having a "names" attribute are
+#' @param dict if TRUE, vectors having a "names" attribute are
 #'   encoded as dicts. If false, the names are discarded.
 #' @param max_size The largest buffer that will be allocated.
 #' @param buf_size How much memory, in bytes, to allocate for packing
@@ -39,13 +40,13 @@ packb <- function(x, ...)  {
 #'   for each call to [writeBytes()].
 #' @param warn Whether to emit warnings.
 #' @return An object of class "raw".
-#' @rdname packb
+#' @rdname packMsg
 #' @useDynLib msgpackr _pack_opts
-pack_opts = function(compatible = FALSE,
-                     as_is = FALSE,
-                     use_dict = TRUE,
-                     max_size = NA,
-                     buf_size = 512,
+packOpts = function(compatible = FALSE,
+                    as_is = FALSE,
+                    use_dict = TRUE,
+                    max_size = NA,
+                    buf_size = 512,
                      package) {
   .Call(`_pack_opts`,
         compatible,
