@@ -231,11 +231,11 @@ test_that("Unpack dicts into envs", {
   unpackMsg(packMsg(list2env(list(a=1, b=2)))) %is% c(a=1, b=2)
 
   x <- new.env()
-  e <- unpackMsg(packMsg(list(a = 1, b = NA)), dict = x)
+  e <- unpackMsg(packMsg(list(a = 1, b = NA)), parent = x)
   typeof(e) %is% "environment"
   as.list(e) %is% list(a = 1, b = NA)
   parent.env(e) %is% x
-  unpackMsg(packMsg(emptyenv()), dict=emptyenv())
+  unpackMsg(packMsg(emptyenv()), parent=emptyenv())
 })
 
 
@@ -254,14 +254,14 @@ test_that("pack envs into sorted dicts", {
 
 
 test_that("Unpack dicts into envs", {
-  x <- unpackMsg(packMsg(c(a=2, b=1, c=3, d=4)), dict=environment())
+  x <- unpackMsg(packMsg(c(a=2, b=1, c=3, d=4)), parent=environment())
   expect_equal(as.list.environment(x, sorted = TRUE),
                list(a=2, b=1, c=3, d=4))
 })
 
 test_that("warn bad var names and discard", {
   b <- packMsg(c(a=1, 3, b=4))
-  expect_warning(e <- unpackMsg(b, dict=environment()), "empty")
+  expect_warning(e <- unpackMsg(b, parent=environment()), "empty")
   as.list.environment(e, all.names=TRUE, sorted=TRUE) %is% list(a=1, b=4)
 })
 
@@ -271,7 +271,7 @@ test_that("NA names, dots names...", {
   names(x) <- n
   names(unpackMsg(packMsg(x))) %is% n
 
-  expect_warning(e <- unpackMsg(packMsg(x), dict=environment()))
+  expect_warning(e <- unpackMsg(packMsg(x), parent=environment()))
   ls(e, all.names=TRUE) %is% c("NA", "two")
 })
 
@@ -302,7 +302,7 @@ test_that("Homepage example", {
 
 test_that("warnings trigger once per message", {
   bigint = as.raw(c(0xcf, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01))
-  length(capture_warnings(unpackb(c(as.raw(0x92), bigint, bigint)))) %is% 1
+  length(capture_warnings(unpackMsg(c(as.raw(0x92), bigint, bigint)))) %is% 1
 })
 
 ## Local Variables:

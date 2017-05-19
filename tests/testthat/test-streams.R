@@ -19,16 +19,25 @@ test_that("consume N messages and return remaining data", {
                     remaining = as.raw(c(0xa7, 0x67, 0x6f, 0x6f)),
                     status = "buffer underflow"))
 
-  expect_equal(unpack_msgs(as.raw(c(0xa7, 0x6f, 0x6f))),
+  expect_equal(unpackMsgs(as.raw(c(0xa7, 0x6f, 0x6f))),
                list(messages = list(),
-                    remaining = c(0xa7, 0x6f, 0x6f),
+                    remaining = as.raw(c(0xa7, 0x6f, 0x6f)),
                     status = "buffer underflow"))
 
-  expect_equal(unpack_msgs(as.raw(c(1:10)), 3),
-               list(list(1:3), as.raw(4:10), "ok"))
+  expect_equal(unpackMsgs(as.raw(c(1:10)), 3),
+               list(messages = as.list(1:3),
+                    remaining = as.raw(4:10),
+                    status = "ok"))
 
-  expect_equal(unpack_msgs(as.raw(c(1:10))),
-               list(list(1:10), raw(0), "end of input"))
+  expect_equal(unpackMsgs(as.raw(c(1:10))),
+               list(messages = as.list(1:10),
+                    remaining = raw(0),
+                    status = "end of input"))
+})
+
+test_that("Errors raised in parsing are caught", {
+  unpackMsgs(as.raw(c(0xc1)))$status %is% "malformed input"
+  stop("not written")
 })
 
 test_that("consume from a connection (blocking)", {

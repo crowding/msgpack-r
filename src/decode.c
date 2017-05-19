@@ -31,7 +31,7 @@ double i64_to_double(cw_unpack_context *, int64_t);
 double u64_to_double(cw_unpack_context *, uint64_t);
 
 SEXPTYPE type_to_sexptype(int t);
- 
+
 const char *decode_item_type(cwpack_item_types);
 
 static long calls = 0;
@@ -55,11 +55,13 @@ SEXP _unpack_opts(SEXP dict,
 
 int init_unpack_context(cw_unpack_context *cxt,
                         SEXP optsxp,
-                        SEXP dat) {
+                        SEXP dat,
+                        unsigned long start) {
   assert_type(dat, RAWSXP);
   assert_type(optsxp, RAWSXP);
   ASSERT(LENGTH(optsxp) == sizeof(unpack_opts));
-  cw_unpack_context_init(cxt, RAW(dat), LENGTH(dat), 0);  
+  ASSERT(start <= LENGTH(dat))
+  cw_unpack_context_init(cxt, RAW(dat) + start, LENGTH(dat) - start, 0);
   cxt->opts = (unpack_opts *)RAW(optsxp);
 
   cxt->opts->depth = 0;
@@ -71,57 +73,26 @@ SEXP _unpack_msg(SEXP dat, SEXP opts) {
   calls++;
   assert_type(dat, RAWSXP);
   cw_unpack_context cxt;
-  init_unpack_context(&cxt, opts, dat);
+  int protections = init_unpack_context(&cxt, opts, dat, 0);
   SEXP out = extract_sexp(&cxt);
+  UNPROTECT(protections);
   return out;
 }
 
-
-SEXP _unpack_msgs(SEXP buf, SEXP opts) {
+SEXP _unpack_msg_partial(SEXP buf, SEXP start, SEXP opts) {
+  calls++;
   cw_unpack_context cxt;
-  int protections = init_unpack_context(&cxt, opts, 0);
+  int protections = init_unpack_context(&cxt, opts, buf, asInteger(start));
 
-  /* start building linkedlist of values */
-  PROTECT_INDEX val_ix;
-  SEXP values;
-  PROTECT_WITH_INDEX(values = R_NilValue, &val_ix);
+  SEXP dat = PROTECT(extract_sexp(&cxt));
   protections++;
 
-  /* remember where current message started */
-  int msg_start = cxt.current - cxt.start;
-  int nmsgs = 0;
-      
-  for (cw_unpack_next(&cxt);
-       cxt.return_code == CWP_RC_OK;
-       nmsgs++, msg_start = cxt.current - cxt.start, cw_unpack_next(&cxt)) {
-      
-      SEXP newval = PROTECT(extract_sexp(&cxt));
-      REPROTECT(values = CONS(newval, values), val_ix);
-      UNPROTECT(1);
-  }
-
-  /* re-pack linked list backwards into array */
-  SEXP msglist = PROTECT(allocVector(VECSXP, nmsgs));
-  protections++;
-  SEXP iter = values;
-  for (int i = nmsgs-1;
-       i >= 0;
-       iter = CDR(iter), i++) {
-      SET_VECTOR_ELT(msglist, i, CAR(iter));
-  }
-
-  /* extract leftover data */
-  int leftover_len = cxt.end - cxt.start - msg_start;
-  SEXP leftovers = PROTECT(allocVector(RAWSXP, leftover_len));
-  protections++;
-  memcpy(RAW(leftovers), cxt.start + msg_start, leftover_len);
-  SEXP return_code = PROTECT(ScalarString(mkChar(decode_return_code(cxt.return_code))));
-  protections++;
-  SEXP output = list3(msglist,
-                      leftovers,
-                      return_code);
+  SEXP out = list3(dat,
+                   PROTECT(ScalarInteger(cxt.current - cxt.start)),
+                   PROTECT(ScalarString(mkChar(decode_return_code(cxt.return_code)))));
+  protections += 2;
   UNPROTECT(protections);
-  return output;
+  return out;
 }
 
 SEXP extract_sexp(cw_unpack_context *cxt) {
@@ -129,11 +100,10 @@ SEXP extract_sexp(cw_unpack_context *cxt) {
   return make_sexp_from_context(cxt);
 }
 
-
 void cw_unpack_next_or_fail(cw_unpack_context *cxt) {
   cw_unpack_next(cxt);
   if (cxt->return_code != CWP_RC_OK) {
-    error("Error encountered during unpacking: %s",
+    error(decode_return_code(cxt->return_code),
           decode_return_code(cxt->return_code));
   };
  }
@@ -141,6 +111,7 @@ void cw_unpack_next_or_fail(cw_unpack_context *cxt) {
 
 SEXP make_sexp_from_context(cw_unpack_context *cxt) {
   LOGD("Making sexp from a %s", decode_item_type(cxt->item.type));
+
 
   switch (cxt->item.type) {
   case CWP_ITEM_NIL:
@@ -166,7 +137,7 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
       return x;
     }
   }
-    
+
   case CWP_ITEM_NEGATIVE_INTEGER:
   case CWP_ITEM_POSITIVE_INTEGER:
   case CWP_ITEM_FLOAT:
@@ -188,7 +159,7 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
     }
 
   default:
-    error("Unsupported item %s", decode_item_type(cxt->item.type));
+    error("Unsupported item: %s", decode_item_type(cxt->item.type));
   }
 }
 
@@ -203,16 +174,18 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
   default:
     error("Can't extract vector from a %s", decode_item_type(cxt->item.type));
   }
-  
+
   uint32_t len = cxt->item.as.array.size;
   LOGD("Extracting array of %d elements, simplifying", len);
   SEXP buf;
   PROTECT_INDEX ix;
+  int protections = 0;
 
   SEXP names = R_NilValue;
   if(has_names) {
     LOGD("Allocating names[%d]", len);
     PROTECT(names = allocVector(STRSXP, len));
+    protections++;
   }
 
   /* Peek at the first item, allocate a buffer */
@@ -234,20 +207,17 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
     }
     PROTECT_WITH_INDEX(buf = allocVector(type, len),
                        &ix);
+    protections++;
     LOGD("Allocated %s vector of length %d, protection id %d",
          type2char(type), len, ix);
-    
+
     buf = fill_vector(cxt, buf, len, ix, names);
 
   } else { /* len == 0 */
-    PROTECT(buf = allocVector(LGLSXP, 0));
+    buf = allocVector(LGLSXP, 0);
   }
 
-  if (has_names) {
-    UNPROTECT(1);
-  }
-  
-  UNPROTECT(1);
+  UNPROTECT(protections);
   return buf;
 }
 
@@ -255,7 +225,8 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
                  PROTECT_INDEX ix, SEXP names) {
   cxt->opts->depth++;
 
-  /* when called, we have the first item "primed" for us in cxt. */
+  /* when called, we have the first item "primed" for us in cxt. Also
+     buf has been protected. */
 
   int non_null_seen = 0;
   int output_data_frame = ((names != R_NilValue)
@@ -267,7 +238,7 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
     LOGD("Might be a data frame");
     df_rows = cxt->item.as.array.size;
   }
-    
+
   for (int i = 0; i < len; i++) {                    /* loop once per item read */
     if (i > 0) {        /* skip what we did when we peeked at first item */
       if (names != R_NilValue) {
@@ -328,7 +299,7 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
         INTEGER(buf)[i] = NA_INTEGER;
         break;
 
-        
+
       case CWP_ITEM_NEGATIVE_INTEGER:
         if (cxt->item.as.i64 == NA_INTEGER
             || cxt->item.as.i64 < INT_MIN) {
@@ -420,19 +391,19 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
 
       break;
 
-      
+
     case VECSXP:
       SET_VECTOR_ELT(buf, i, make_sexp_from_context(cxt));
 
       break;
 
-      
+
     default:
       error("Don't know how to fill out a %s (this shouldn't happen)",
             type2char(TYPEOF(buf)));
 
     } /* end switch(TYPEOF(buf)) */
-    
+
   } /* end for(i = ... */
 
   if (names != R_NilValue) {
@@ -473,7 +444,7 @@ SEXP extract_env(cw_unpack_context *cxt) {
       WARN_ONCE("Item with empty name was discarded");
     } else {
       SEXP sym = PROTECT(installChar(key));
-    
+
       if (sym == R_MissingArg || sym == R_DotsSymbol || DDVAL(sym)) {
         WARN_ONCE("Item with key `%s` was discarded", CHAR(PRINTNAME(sym)));
       } else {
@@ -542,7 +513,7 @@ SEXP make_charsxp_or_null(cw_unpack_context *cxt) {
          verification */
       if (!verify_utf8(buf, len)) {
         WARN_ONCE("String is not valid UTF-8, returning raw instead.");
-        return R_NilValue; 
+        return R_NilValue;
       }
     }
 
@@ -615,7 +586,7 @@ const char *decode_item_type(cwpack_item_types x) {
   case CWP_ITEM_BIN: return "binary";
   case CWP_ITEM_ARRAY: return "array";
   case CWP_ITEM_MAP: return "map";
-  case CWP_NOT_AN_ITEM: return "Not an item";
+  case CWP_NOT_AN_ITEM: return "not an item";
   default:
     if (x <= CWP_ITEM_MAX_USER_EXT
         && x >= CWP_ITEM_MIN_USER_EXT) {

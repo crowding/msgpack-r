@@ -11,12 +11,12 @@ msgConnection(conn, read_size = NA, max_size = NA, ...)
 
 \item{read_size}{The default read size.}
 
-\item{max_size}{The maximum size of a message.}
+\item{max_size}{The maximum size of an incoming message, in bytes.}
 
 \item{...}{Packing options (see pack[])}
 }
 \value{
-A connection object.
+An object of class 'msgConnection'
 }
 \description{
 Wrap a connection so that it can read msgpack objects.
