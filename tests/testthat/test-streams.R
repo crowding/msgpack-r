@@ -9,19 +9,26 @@ msgs = as.raw(c(0xa5, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
                 0xa7, 0x67, 0x6f, 0x6f))
 
 test_that("consume N messages and return remaining data", {
-  expect_equal(unpackMsgs(x),
-               list(list("hello", "and"),
-                    as.raw(c(0xa7, 0x67, 0x6f, 0x6f))))
+  expect_equal(unpackMsgs(as.raw(1:10)),
+               list(messages = as.list(1:10),
+                    remaining = raw(0),
+                    status = "end of input"))
+
+  expect_equal(unpackMsgs(msgs),
+               list(messages = list("hello", "and"),
+                    remaining = as.raw(c(0xa7, 0x67, 0x6f, 0x6f)),
+                    status = "buffer underflow"))
 
   expect_equal(unpack_msgs(as.raw(c(0xa7, 0x6f, 0x6f))),
-               list(list(), c(0xa7, 0x6f, 0x6f)))
+               list(messages = list(),
+                    remaining = c(0xa7, 0x6f, 0x6f),
+                    status = "buffer underflow"))
 
   expect_equal(unpack_msgs(as.raw(c(1:10)), 3),
-               list(1:3), as.raw(4:10))
+               list(list(1:3), as.raw(4:10), "ok"))
 
   expect_equal(unpack_msgs(as.raw(c(1:10))),
-               list(1:10), raw(0))
-
+               list(list(1:10), raw(0), "end of input"))
 })
 
 test_that("consume from a connection (blocking)", {

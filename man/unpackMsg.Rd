@@ -54,9 +54,9 @@ Strings are read as UTF-8. If a msgpack string does not appear to
 be valid UTF-8, a warning is printed and a raw object is produced
 instead.
 
-R does not implement vector names or environment keys as anything
-other than string. If a non-string appears as key in a msgpack
-dict, it will be converted to string with \code{dput()}.
+R does not currently support non-string vector names or environment
+keys. If a non-string is used as key in a msgpack dict, it will be
+converted to string with \code{dput()}.
 }
 \description{
 Unpack a raw byte object in msgpack format into an R data object.

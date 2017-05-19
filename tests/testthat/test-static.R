@@ -301,7 +301,8 @@ test_that("Homepage example", {
 })
 
 test_that("warnings trigger once per message", {
-  length(capture_warnings(unpackMsg(c(as.raw(0x92), bigint, bigint)))) %is% 1
+  bigint = as.raw(c(0xcf, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01))
+  length(capture_warnings(unpackb(c(as.raw(0x92), bigint, bigint)))) %is% 1
 })
 
 ## Local Variables:
