@@ -319,18 +319,18 @@ test_that("limit pending size", {
   # limit the number of items we'va allocated, as well. E.G. each
   # array we are in the middle of, treat as a promise for at least one
   # byte per item in the message.
-  f <- packMsg(c(1:5, list(1:10), 6:10))
-  unpackMsg(f, max_size=16)
-  expect_error(unpackMsg(f, max_size=15), "long")
+  bad <- packMsg(c(1:5, list(1:10), 6:10))
+  unpackMsg(bad, max_size = 16)
+  expect_error(unpackMsg(bad, max_size=15), "long")
 })
 
 
 test_that("prevent stack overflows", {
   # another attack may be to try to overflow the stack with an indefinitely
   # nested array, e.g. 0x919191919191919191.....
-  t <- packMsg(list(list(list(1), list(list(2, list(3))))))
+  bad <- packMsg(list(list(list(1), list(list(2, list(3))))))
   expect_error(unpackMsg(bad, max_depth=4), "nest")
-  expect_error(unpackMsg(bad, max_depth=5), "nest")
+  unpackMsg(bad, max_depth=5)
 })
 
 

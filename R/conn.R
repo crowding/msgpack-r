@@ -1,6 +1,6 @@
-#' Functions for writing and reading msgpack messages from connections.
+#' Read and write msgpack messages using connections.
 #'
-#' @param conn A connection object open in binary mode.
+#' @param conn A [connection] object open in binary mode.
 #' @param max_size The largest partial uncompleted message to
 #'   store. `NA` means do not enforce a limit.
 #' @param read_size How many bytes to read at a time.
@@ -9,12 +9,17 @@
 #'
 #' Because msgpack messages have unpredictable length, the decoder
 #' reads ahead in chunks, then finds the boundaries between messages.
-#' Therefore it is best to use a nonblocking connection.
+#' Therefore when reading over a socket or a fifo it is best to use a
+#' nonblocking connection, and it will not work to mix readMsg and
+#' readBin on the same connection.
 #'
 #' In the present implementation, decoding must start over at the
 #' beginning of the message when is split across two or more
 #' objects. So `read_size` should be set to something larger than the
 #' typical message recieved.
+#'
+#' Reading from connections is somewhat experimental at the
+#' moment. Please report problems you encounter.
 #'
 #' @export
 msgConnection <- function(conn, read_size=2^16, max_size=NA, ...) {
@@ -25,31 +30,29 @@ msgConnection <- function(conn, read_size=2^16, max_size=NA, ...) {
     collect <- catenator(list())
     if (is.na(n)) n <- .Machine$integer.max
     while ((nm <- collect(action="length")) < n) {
-      writeLines(status)
       switch(status,
              "ok" = {
                if (length(partial) == 0)
-                 partial <<- readBin(conn, "raw", read_size)
+                 partial <<- readRaw(conn, read_size)
              },
              "buffer underflow" = {
-               tmp <- readBin(conn, "raw", read_size)
+               tmp <- readRaw(conn, read_size)
                if (length(tmp) == 0) {
                  break()
-               } else if (length(partial) + length(tmp) > max_buf) {
-                 (status <<- "buffer overflow")
+               } else if (!is.na(max_size)
+                          && length(partial) + length(tmp) > max_size) {
+                 status <<- "buffer overflow"
                  break()
                } else {
                  partial <<- c(partial, tmp)
                }
              },
              "end of input" = {
-               buf <- readBin(conn, "raw", read_size)
+               buf <- readRaw(conn, read_size)
              },
              #default
              break()
              )
-      writeLines(paste0("-->", status))
-
       if (length(partial) > 0) {
         msgs_bytes <- unpackMsgs(partial, n - nm, max_size = max_size, ...)
         collect(msgs_bytes[[1]])
@@ -68,7 +71,14 @@ msgConnection <- function(conn, read_size=2^16, max_size=NA, ...) {
   addClass(conn, "msgConnection")
 }
 
-
+# I get errors thrown (sometimes) when reading at the end of
+# a nonblocking fifo.
+readRaw <- function(conn, n) {
+  tryCatch(readBin(conn, 'raw', n),
+           error=function(e) {
+             raw(0)
+             })
+}
 
 catenator <- function(val=c()) {
   n <- length(val)
@@ -102,7 +112,7 @@ addClass <- function(x, classes) structure(x, class = c(classes, class(x)))
 
 #' @rdname msgConnection
 #' @export
-partial <- function(x) UseMethod(x)
+partial <- function(x) UseMethod("partial")
 
 #' @rdname msgConnection
 #' @export
@@ -113,8 +123,7 @@ partial.msgConnection <- function(x) {
 #' @rdname msgConnection
 #' @export
 #' @param n The maximum number of messages to read. A value of NA
-#'   means to parse all available messages up until the end of input
-#'   (if blocking) or a read timeout (if nonblocking).
+#'   means to parse all available messages up until the end of input.
 #' @return [readMsgs(conn, n)] returns a list of some length between 0
 #'   and n, containing the decoded messages.
 readMsgs <- function(conn, n = NA, ...) {
@@ -132,7 +141,7 @@ readMsgs.msgConnection <- function(conn, n = NA, ...) {
 #'   were read, `"buffer underflow"` indicates a partial message is on
 #'   the line, `"end of input"` means the last available message has
 #'   been read.  Other values indicate errors encountered in decoding,
-#'   which effectively stop all reading.
+#'   which will effectively halt reading.
 #' @export
 status <- function(conn) UseMethod("status")
 
@@ -164,7 +173,7 @@ writeMsg <- function(obj, conn, ...) {
 #' [writeMsgs(l, conn)] writes a list of
 #'   messages to a connection. That is, writeMsg(1:10) writes one
 #'   message containing an array, while [writeMsgs(1:10, conn)] writes
-#'   ten consecutive messages containing an integer.
+#'   ten consecutive messages each containing one integer.
 #' @rdname msgConnection
 #' @export
 writeMsgs <- function(objs, conn, ...) {

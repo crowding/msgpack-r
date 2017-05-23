@@ -3,11 +3,15 @@
 #include <inttypes.h>
 #include "utf8.h"
 
+#ifdef DEBUG
 #define LOGD(FMT, ...)                                   \
   LOG("%.*s " FMT,                                       \
       MIN (cxt->opts->depth, 40),                        \
       ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>!",        \
       ##__VA_ARGS__);
+#else
+#define LOGD(...) NULL
+#endif
 
 SEXP extract_sexp(cw_unpack_context *);
 void cw_unpack_next_or_fail(cw_unpack_context *);

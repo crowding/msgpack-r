@@ -2,13 +2,25 @@
 % Please edit documentation in R/encode.R
 \name{packMsg}
 \alias{packMsg}
+\alias{packMsgs}
 \alias{packOpts}
+\alias{prepack}
+\alias{prepack.default}
+\alias{prepack.data.frame}
 \title{Encode an R object into a raw vector using msgpack.}
 \usage{
 packMsg(x, ...)
 
+packMsgs(xs, ...)
+
 packOpts(compatible = FALSE, as_is = FALSE, use_dict = TRUE,
   max_size = NA, buf_size = 512, package)
+
+prepack(x)
+
+\method{prepack}{default}(x)
+
+\method{prepack}{data.frame}(x)
 }
 \arguments{
 \item{x}{An R object, which can be null, a vector, list,
@@ -33,15 +45,15 @@ Object attributes other than \code{name} and \code{class} are ignored.}
 
 \item{...}{Options controlling packing, as described on this page.}
 
+\item{xs}{a list of objects to pack.}
+
 \item{compatible}{If TRUE, emitted bytes conform to version 1.0 of
 msgpack encoding. This means that msgpack strings are used for
 raw objects.}
 
-\item{as_is}{If TRUE, singletons (R vectors of length 1 having no
-names attribute) are encoded as msgpack arrays of length
-\enumerate{
-\item Otherwise singleton vectors are simplified to msgpack scalars.
-}}
+\item{as_is}{If TRUE, singletons (R primitive vectors of length 1
+having no names attribute) are encoded as msgpack arrays of
+length 1. Otherwise singletons are simplified to msgpack scalars.}
 
 \item{use_dict}{If TRUE, vectors having a "names" attribute are
 encoded as dicts. If false, they are encoded as arrays and the
@@ -49,11 +61,9 @@ names are discarded}
 
 \item{max_size}{The largest buffer that will be allocated.}
 
-\item{buf_size}{The initial amount of memory, in bytes to allocate
+\item{buf_size}{The initial amount of memory, in bytes, to allocate
 for packing each message. Currently there is little reason to
-change the default.}
-
-\item{warn}{Whether to emit warnings.}
+change this.}
 }
 \value{
 An object of class "raw".

@@ -28,26 +28,27 @@ packMsg <- function(x, ...)  {
   .Call(`_pack_msg`, x, packOpts(...))
 }
 
+#' @param xs a list of objects to pack.
+#' @rdname packMsg
 #' @export
-packMsgs <- function(x, ...) {
+packMsgs <- function(xs, ...) {
  opts <- packOpts()
- c(lapply(x, function(xx) .Call(`_pack_msg`, xx, opts)), recursive=TRUE)
+ unlist(lapply(xs, function(xx) .Call(`_pack_msg`, xx, opts)))
 }
 
 #' @param compatible If TRUE, emitted bytes conform to version 1.0 of
 #'   msgpack encoding. This means that msgpack strings are used for
 #'   raw objects.
-#' @param as_is If TRUE, singletons (R vectors of length 1 having no
-#'   names attribute) are encoded as msgpack arrays of length
-#'   1. Otherwise singleton vectors are simplified to msgpack scalars.
+#' @param as_is If TRUE, singletons (R primitive vectors of length 1
+#'   having no names attribute) are encoded as msgpack arrays of
+#'   length 1. Otherwise singletons are simplified to msgpack scalars.
 #' @param use_dict If TRUE, vectors having a "names" attribute are
 #'   encoded as dicts. If false, they are encoded as arrays and the
 #'   names are discarded
 #' @param max_size The largest buffer that will be allocated.
-#' @param buf_size The initial amount of memory, in bytes to allocate
+#' @param buf_size The initial amount of memory, in bytes, to allocate
 #'   for packing each message. Currently there is little reason to
-#'   change the default.
-#' @param warn Whether to emit warnings.
+#'   change this.
 #' @rdname packMsg
 #' @useDynLib msgpackr _pack_opts
 packOpts = function(compatible = FALSE,
@@ -65,10 +66,14 @@ packOpts = function(compatible = FALSE,
         parent.env(environment()))
 }
 
+#' @rdname packMsg
 #' @export
 prepack <- function(x) UseMethod("prepack")
 
+#' @rdname packMsg
 #' @export
 prepack.default <- function(x) unclass(x)
 
+#' @rdname packMsg
+#' @export
 prepack.data.frame <- function(x) I(unclass(x))

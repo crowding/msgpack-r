@@ -12,7 +12,14 @@
 #define INTEGER_ELT(O, I) (INTEGER(O)[I])
 #define REAL_ELT(O, I) (REAL(O)[I])
 
+
+#undef DEBUG
+
+#ifdef DEBUG
 #define LOG(FMT, ...) Rprintf(FMT " (%s:%d)\n", ##__VA_ARGS__, __FUNCTION__, __LINE__)
+#else
+#define LOG(...) NULL
+#endif
 
 #define WARN_ONCE(...) ({                                         \
       static long last_warned = 0;                                \

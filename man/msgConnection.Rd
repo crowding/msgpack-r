@@ -10,9 +10,9 @@
 \alias{readMsg}
 \alias{writeMsg}
 \alias{writeMsgs}
-\title{Functions for writing and reading msgpack messages from connections.}
+\title{Read and write msgpack messages using connections.}
 \usage{
-msgConnection(conn, read_size = 2^16, max_buf = NA, ...)
+msgConnection(conn, read_size = 2^16, max_size = NA, ...)
 
 partial(x)
 
@@ -31,30 +31,34 @@ writeMsg(obj, conn, ...)
 writeMsgs(objs, conn, ...)
 }
 \arguments{
-\item{conn}{A connection object open in binary mode.}
+\item{conn}{A \link{connection} object open in binary mode.}
 
 \item{read_size}{How many bytes to read at a time.}
+
+\item{max_size}{The largest partial uncompleted message to
+store. \code{NA} means do not enforce a limit.}
 
 \item{...}{Packing options (see \link{packMsg})}
 
 \item{n}{The maximum number of messages to read. A value of NA
-means to parse all available messages up until the end of input
-(if blocking) or a read timeout (if nonblocking).}
-
-\item{max_size}{The largest partial uncompleted message to
-store. \code{NA} means do not enforce a limit.}
+means to parse all available messages up until the end of input.}
 }
 \value{
 \code{\link[=msgConnection]{msgConnection()}} returns an object of class 'msgConnection'
 
-Because megpack messages have unpredictable length, the decoder
-will "read ahead."  Therefore it is best to use a nonblocking
-connection.
+Because msgpack messages have unpredictable length, the decoder
+reads ahead in chunks, then finds the boundaries between messages.
+Therefore when reading over a socket or a fifo it is best to use a
+nonblocking connection, and it will not work to mix readMsg and
+readBin on the same connection.
 
 In the present implementation, decoding must start over at the
 beginning of the message when is split across two or more
 objects. So \code{read_size} should be set to something larger than the
 typical message recieved.
+
+Reading from connections is somewhat experimental at the
+moment. Please report problems you encounter.
 
 \link{readMsgs(conn, n)} returns a list of some length between 0
 and n, containing the decoded messages.
@@ -64,15 +68,15 @@ connection. A value of \code{"ok"} indicates all requested messages
 were read, \code{"buffer underflow"} indicates a partial message is on
 the line, \code{"end of input"} means the last available message has
 been read.  Other values indicate errors encountered in decoding,
-which effectively stop all reading.
+which will effectively halt reading.
 
 \link{readMsg(conn)} returns exactly one message, or throws an error.
 }
 \description{
-Functions for writing and reading msgpack messages from connections.
+Read and write msgpack messages using connections.
 
 \link{writeMsgs(l, conn)} writes a list of
 messages to a connection. That is, writeMsg(1:10) writes one
 message containing an array, while \link{writeMsgs(1:10, conn)} writes
-ten consecutive messages containing an integer.
+ten consecutive messages each containing one integer.
 }
