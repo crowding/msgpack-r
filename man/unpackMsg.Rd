@@ -2,61 +2,59 @@
 % Please edit documentation in R/decode.R
 \name{unpackMsg}
 \alias{unpackMsg}
+\alias{unpackOpts}
 \title{Unpack a raw byte object in msgpack format into an R data object.}
 \usage{
 unpackMsg(x, ...)
+
+unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
+  max_depth = NA)
 }
 \arguments{
-\item{dat}{\code{\link[base:raw]{base::raw()}} byte data, such as read from a
-\code{\link[=make.socket]{make.socket()}}}
+\item{parent}{If an environment is given, (such as \code{\link[=emptyenv]{emptyenv()}}),
+msgpack dicts will be unpacked into environment objects, with the
+given value as parent. Otherwise dicts will be unpacked into
+named vectors. Note that unpacking into environments precludes
+\code{use_df}.}
 
-\item{use_env}{if FALSE, msgpack dicts are unpacked into a vector
-or list with a name attribute. If \code{TRUE}, msgpack dicts are
-unpacked into environment objects. Note that this overrides the
-option use_df.}
+\item{df}{When \code{TRUE}, msgpack dicts, whose elements are all arrays
+having the same length, are converted to \code{\link[=data.frame]{data.frame()}}s.
 
-\item{array}{Controls how to unpack msgpack arrays. \code{c()}, the
-default, will unpack arrays into the simplest type of
-vector. \code{list()} here will always unpack arrays into lists.}
+\code{\link[=unpackOpts]{unpackOpts()}} interprets the options that are common to
+\code{\link[=unpackMsgs]{unpackMsgs()}}, \code{\link[=unpackMsg]{unpackMsg()}}, and \code{\link[=msgConnection]{msgConnection()}}.}
 
-\item{transform}{A function will be called for each data element.}
-
-\item{dict}{Controls how to unpack a msgpack dict. Give en
-environment, such as \code{\link[=emptyenv]{emptyenv()}}, and environments will be
-constructed using the given environment as parent. Otherwise
-dicts will be unpacked into named vectors. Note that unpacking
-into environments precludes \code{use_df}.}
-
-\item{use_df}{When \code{TRUE}, msgpack dicts, whose elements are all
-arrays having the same length, are converted to \code{\link[=data.frame]{data.frame()}}s.}
-
-\item{nil}{If NA, will represent msgpack nil values in msgpack
-arrays as NA. If \code{NULL}, will unpack nils as \code{NULL}, upcasting
-primitives to lists in the process. If \code{c()}, will omit null
-values from arrays.}
+\item{simplify}{Controls how to unpack msgpack arrays. \code{TRUE}, the
+default, will unpack arrays into the simplest available type of
+vector. \code{FALSE} here will always unpack arrays into lists.}
 }
 \value{
-an R data object.
+\link{unpackMsg(x)} returns one decoded message (which might be
+shorter than the input raw), or throws an error.
 
 The msgpack format does not have typed arrays, so all msgpack
 arrays are effectively lists from the R perspective. However, if an
 array containing compatibly typed elements is read, \code{unpack} will
-return a logical, integer, real or string vector as appropriate.
-The coercion used is more conservative than R's coercion: Integer
+return a logical, integer, real or string vector as
+appropriate. This behavior is disabled with \code{simplify=FALSE}.  The
+coercion used is more conservative than R's coercion: Integer
 values may be converted to real, but boolean values will not be
 cast to numeric, nor any types to string. If conversion from a
 large integer to real loses precision, a warning is printed.
 
-Msgpack also does not distinguish between \code{NA} and \code{NULL}. The
-argument \code{nil} controls how msgpack nils are unpacked.
+Msgpack also does not distinguish between \code{NA} and \code{NULL}. All nils
+will be decoded as NA.
 
-Strings are read as UTF-8. If a msgpack string does not appear to
-be valid UTF-8, a warning is printed and a raw object is produced
-instead.
+Strings are assumed to be UTF-8 encoded. If a msgpack string does
+not appear to be valid UTF-8, a warning is printed and a raw object
+is produced instead.
 
-R does not implement vector names or environment keys as anything
-other than string. If a non-string appears as key in a msgpack
-dict, it will be converted to string with \code{dput()}.
+Msgpack allows any type to be the key of a dict, but R only
+supports strings in vector names or environment keys. If a
+non-string appears as key in a msgpack dict, it will be converted
+to string with \code{\link[=deparse]{deparse()}}.
+
+Extension types will be decoded as raw objects with a class like
+\code{"ext120"} and a warning.
 }
 \description{
 Unpack a raw byte object in msgpack format into an R data object.

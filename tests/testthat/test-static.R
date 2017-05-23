@@ -17,8 +17,6 @@ roundtrip <- function(start) {
 
 
 pack_rt <- function (start, cmp) {
-  "Pack and unpack and check that your data made the round trip (as defined by
-   expect_equivalent)"
   bin <- packMsg(start)
   expect_equal(bin, cmp)
   end <- unpackMsg(bin)
@@ -253,17 +251,20 @@ test_that("pack envs into sorted dicts", {
 })
 
 
+
 test_that("Unpack dicts into envs", {
   x <- unpackMsg(packMsg(c(a=2, b=1, c=3, d=4)), parent=environment())
   expect_equal(as.list.environment(x, sorted = TRUE),
                list(a=2, b=1, c=3, d=4))
 })
 
+
 test_that("warn bad var names and discard", {
   b <- packMsg(c(a=1, 3, b=4))
   expect_warning(e <- unpackMsg(b, parent=environment()), "empty")
   as.list.environment(e, all.names=TRUE, sorted=TRUE) %is% list(a=1, b=4)
 })
+
 
 test_that("NA names, dots names...", {
   x <- list(2, "four", rep(1,6), c(), list())
@@ -275,6 +276,7 @@ test_that("NA names, dots names...", {
   ls(e, all.names=TRUE) %is% c("NA", "two")
 })
 
+
 test_that("detect data frames", {
   expect_false(is.data.frame(unpackMsg(packMsg(list(a=1, b=2)))))
   expect_true(is.data.frame(unpackMsg(packMsg(list(a=1, b=2), as_is=TRUE))))
@@ -282,14 +284,17 @@ test_that("detect data frames", {
   expect_false(is.data.frame(unpackMsg(packMsg(list(a=c(1, 2, 3), b=c(2, 3))))))
 })
 
+
 test_that("Raw with names", {
   expect_warning(packMsg(structure(as.raw(c(1,2)), names=c("a", "b"))))
 })
+
 
 test_that("unpackMsg refusing to simplify", {
   unpackMsg(packMsg(list(1, 2))) %is% c(1L, 2L)
   unpackMsg(packMsg(list(1, 2)), simplify=FALSE) %is% list(1L, 2L)
 })
+
 
 test_that("Homepage example", {
   pack_rt(list(compact=TRUE, schema=0),
@@ -300,11 +305,46 @@ test_that("Homepage example", {
             as.raw(00)))
 })
 
+
 test_that("warnings trigger once per message", {
   bigint = as.raw(c(0xcf, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01))
   length(capture_warnings(unpackMsg(c(as.raw(0x92), bigint, bigint)))) %is% 1
 })
 
+
+test_that("limit pending size", {
+  # the idea is that you may get a message like,
+  # <ddffffddffffddfffff...> which if not defended against, will make
+  # you malloc up all your memory with a small message. So we need to
+  # limit the number of items we'va allocated, as well. E.G. each
+  # array we are in the middle of, treat as a promise for at least one
+  # byte per item in the message.
+  f <- packMsg(c(1:5, list(1:10), 6:10))
+  unpackMsg(f, max_size=16)
+  expect_error(unpackMsg(f, max_size=15), "long")
+})
+
+
+test_that("prevent stack overflows", {
+  # another attack may be to try to overflow the stack with an indefinitely
+  # nested array, e.g. 0x919191919191919191.....
+  t <- packMsg(list(list(list(1), list(list(2, list(3))))))
+  expect_error(unpackMsg(bad, max_depth=4), "nest")
+  expect_error(unpackMsg(bad, max_depth=5), "nest")
+})
+
+
+test_that("extension types unpacked as raw with a class attr", {
+  x <- as.raw(c(0xd4, 0xfe, 0xdd))
+  expect_warning(d <- unpackMsg(x), "raw")
+  expect_equal(d, structure(as.raw(0xdd), class="ext-2"))
+
+  x <- as.raw(c(0xd4, 0x7f, 0xdd))
+  expect_warning(d <- unpackMsg(x), "raw")
+  expect_equal(d, structure(as.raw(0xdd), class="ext127"))
+})
+
 ## Local Variables:
 ## ess-r-package-info: ("msgpackr" . "~/msgpackr/")
 ## End:
+

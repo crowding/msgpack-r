@@ -2,22 +2,77 @@
 % Please edit documentation in R/conn.R
 \name{msgConnection}
 \alias{msgConnection}
-\title{Wrap a connection so that it can read msgpack objects.}
+\alias{partial}
+\alias{partial.msgConnection}
+\alias{readMsgs}
+\alias{status}
+\alias{status.msgConnection}
+\alias{readMsg}
+\alias{writeMsg}
+\alias{writeMsgs}
+\title{Functions for writing and reading msgpack messages from connections.}
 \usage{
-msgConnection(conn, read_size = NA, max_size = NA, ...)
+msgConnection(conn, read_size = 2^16, max_buf = NA, ...)
+
+partial(x)
+
+\method{partial}{msgConnection}(x)
+
+readMsgs(conn, n = NA, ...)
+
+status(conn)
+
+\method{status}{msgConnection}(conn)
+
+readMsg(conn, ...)
+
+writeMsg(obj, conn, ...)
+
+writeMsgs(objs, conn, ...)
 }
 \arguments{
-\item{conn}{A connection object that supports readBytes.}
+\item{conn}{A connection object open in binary mode.}
 
-\item{read_size}{The default read size.}
+\item{read_size}{How many bytes to read at a time.}
 
-\item{max_size}{The maximum size of an incoming message, in bytes.}
+\item{...}{Packing options (see \link{packMsg})}
 
-\item{...}{Packing options (see pack[])}
+\item{n}{The maximum number of messages to read. A value of NA
+means to parse all available messages up until the end of input
+(if blocking) or a read timeout (if nonblocking).}
+
+\item{max_size}{The largest partial uncompleted message to
+store. \code{NA} means do not enforce a limit.}
 }
 \value{
-An object of class 'msgConnection'
+\code{\link[=msgConnection]{msgConnection()}} returns an object of class 'msgConnection'
+
+Because megpack messages have unpredictable length, the decoder
+will "read ahead."  Therefore it is best to use a nonblocking
+connection.
+
+In the present implementation, decoding must start over at the
+beginning of the message when is split across two or more
+objects. So \code{read_size} should be set to something larger than the
+typical message recieved.
+
+\link{readMsgs(conn, n)} returns a list of some length between 0
+and n, containing the decoded messages.
+
+\link{status(conn)} returns the status of msgpack decoding on the
+connection. A value of \code{"ok"} indicates all requested messages
+were read, \code{"buffer underflow"} indicates a partial message is on
+the line, \code{"end of input"} means the last available message has
+been read.  Other values indicate errors encountered in decoding,
+which effectively stop all reading.
+
+\link{readMsg(conn)} returns exactly one message, or throws an error.
 }
 \description{
-Wrap a connection so that it can read msgpack objects.
+Functions for writing and reading msgpack messages from connections.
+
+\link{writeMsgs(l, conn)} writes a list of
+messages to a connection. That is, writeMsg(1:10) writes one
+message containing an array, while \link{writeMsgs(1:10, conn)} writes
+ten consecutive messages containing an integer.
 }

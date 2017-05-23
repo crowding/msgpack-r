@@ -3,7 +3,6 @@
 #include <inttypes.h>
 #include "utf8.h"
 
-
 #define LOGD(FMT, ...)                                   \
   LOG("%.*s " FMT,                                       \
       MIN (cxt->opts->depth, 40),                        \
@@ -24,6 +23,7 @@ SEXP new_env(SEXP parent);
 SEXP make_charsxp_or_null(cw_unpack_context *);
 SEXP make_charsxp_or_raw_from_context(cw_unpack_context *);
 SEXP make_raw_from_context(cw_unpack_context *);
+SEXP make_ext_from_context(cw_unpack_context *);
 
 SEXP always_make_charsxp_from_context(cw_unpack_context *);
 
@@ -36,10 +36,17 @@ const char *decode_item_type(cwpack_item_types);
 
 static long calls = 0;
 
+int isNA (SEXP item) {
+  if (asReal(item) == NA_REAL) return 1;
+  else return 0;
+}
+
 SEXP _unpack_opts(SEXP dict,
                   SEXP use_df,
                   SEXP simplify,
-                  SEXP package) {
+                  SEXP package,
+                  SEXP max_size,
+                  SEXP max_depth) {
   SEXP optsxp = PROTECT(allocVector(RAWSXP, sizeof(unpack_opts)));
   unpack_opts *opts = (unpack_opts*)(RAW(optsxp));
   opts->use_df = asLogical(use_df);
@@ -47,10 +54,16 @@ SEXP _unpack_opts(SEXP dict,
   opts->simplify = asLogical(simplify);
   opts->package = package;
 
+  if (isNA(max_size)) opts->max_pending = ULONG_MAX;
+  else opts->max_pending = asReal(max_size);
+  if (isNA(max_depth)) opts->max_depth = UINT_MAX;
+  else opts->max_depth = asInteger(max_depth);
+
   setAttrib(optsxp, install("refs"), CONS(dict, CONS(package, R_NilValue)));
   UNPROTECT(1);
   return optsxp;
 }
+
 
 
 int init_unpack_context(cw_unpack_context *cxt,
@@ -65,6 +78,7 @@ int init_unpack_context(cw_unpack_context *cxt,
   cxt->opts = (unpack_opts *)RAW(optsxp);
 
   cxt->opts->depth = 0;
+  cxt->opts->pending = 0;
   return 0;
 }
 
@@ -74,7 +88,11 @@ SEXP _unpack_msg(SEXP dat, SEXP opts) {
   assert_type(dat, RAWSXP);
   cw_unpack_context cxt;
   int protections = init_unpack_context(&cxt, opts, dat, 0);
+  LOG("depth = %u, pending = %lu", cxt.opts->depth, cxt.opts->pending); 
   SEXP out = extract_sexp(&cxt);
+  LOG("depth = %u, pending = %lu", cxt.opts->depth, cxt.opts->pending); 
+  ASSERT(cxt.opts->depth == 0);
+  ASSERT(cxt.opts->pending == 0);
   UNPROTECT(protections);
   return out;
 }
@@ -91,29 +109,51 @@ SEXP _unpack_msg_partial(SEXP buf, SEXP start, SEXP opts) {
                    PROTECT(ScalarInteger(cxt.current - cxt.start)),
                    PROTECT(ScalarString(mkChar(decode_return_code(cxt.return_code)))));
   protections += 2;
+  
+  ASSERT(cxt.opts->depth == 0);
+  ASSERT(cxt.opts->pending == 0);  
   UNPROTECT(protections);
   return out;
 }
+
 
 SEXP extract_sexp(cw_unpack_context *cxt) {
   cw_unpack_next_or_fail(cxt);
   return make_sexp_from_context(cxt);
 }
 
+
 void cw_unpack_next_or_fail(cw_unpack_context *cxt) {
   cw_unpack_next(cxt);
   if (cxt->return_code != CWP_RC_OK) {
-    error(decode_return_code(cxt->return_code),
+    error("%s",
           decode_return_code(cxt->return_code));
-  };
- }
+  }
+}
+
+
+void add_pending(cw_unpack_context *cxt, unsigned long howmany) {
+  if (cxt->opts->depth >= cxt->opts->max_depth) {
+    error("Message too deeply nested");
+  }
+  cxt->opts->pending += howmany;
+  if (cxt->opts->pending >= cxt->opts->max_pending) {
+    error("Pending message too long");
+  }
+  LOGD("depth = %u, pending = %lu", cxt->opts->depth, cxt->opts->pending); 
+}
+
+
+SEXP alloc_vector(cw_unpack_context *cxt, SEXPTYPE type, unsigned long len) {
+  add_pending(cxt, len);
+  return allocVector(type, len);
+}
 
 
 SEXP make_sexp_from_context(cw_unpack_context *cxt) {
   LOGD("Making sexp from a %s", decode_item_type(cxt->item.type));
-
-
-  switch (cxt->item.type) {
+  cwpack_item_types x = cxt->item.type;
+  switch (x) {
   case CWP_ITEM_NIL:
     return ScalarLogical(NA_LOGICAL);
 
@@ -144,7 +184,7 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
   case CWP_ITEM_DOUBLE: {
     SEXP buf;
     PROTECT_INDEX ix;
-    PROTECT_WITH_INDEX(buf = allocVector(type_to_sexptype(cxt->item.type), 1),
+    PROTECT_WITH_INDEX(buf = alloc_vector(cxt, type_to_sexptype(cxt->item.type), 1),
                        &ix);
     buf = fill_vector(cxt, buf, 1, ix, R_NilValue);
     UNPROTECT(1);
@@ -159,7 +199,15 @@ SEXP make_sexp_from_context(cw_unpack_context *cxt) {
     }
 
   default:
-    error("Unsupported item: %s", decode_item_type(cxt->item.type));
+    if (x <= CWP_ITEM_MAX_USER_EXT
+        && x >= CWP_ITEM_MIN_USER_EXT) {
+      return make_ext_from_context(cxt);
+    } else if (x <= CWP_ITEM_MAX_RESERVED_EXT
+               && x >= CWP_ITEM_MIN_RESERVED_EXT) {
+      return make_ext_from_context(cxt);
+    } else {
+      error("Unsupported item: %s", decode_item_type(cxt->item.type));
+    }
   }
 }
 
@@ -184,7 +232,7 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
   SEXP names = R_NilValue;
   if(has_names) {
     LOGD("Allocating names[%d]", len);
-    PROTECT(names = allocVector(STRSXP, len));
+    PROTECT(names = alloc_vector(cxt, STRSXP, len));
     protections++;
   }
 
@@ -205,7 +253,7 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
     } else {
       type = VECSXP;
     }
-    PROTECT_WITH_INDEX(buf = allocVector(type, len),
+    PROTECT_WITH_INDEX(buf = alloc_vector(cxt, type, len),
                        &ix);
     protections++;
     LOGD("Allocated %s vector of length %d, protection id %d",
@@ -220,6 +268,7 @@ SEXP extract_simplified_vector(cw_unpack_context *cxt) {
   UNPROTECT(protections);
   return buf;
 }
+
 
 SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
                  PROTECT_INDEX ix, SEXP names) {
@@ -260,6 +309,8 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
       }
     }
 
+    cxt->opts->pending -= (names == R_NilValue ? 1 : 2);
+    
   UNPACK_VALUE:                 /* goto here to "try again" after coercion */
     LOGD("Storing item %d, a %s, into a %s",
          i, decode_item_type(cxt->item.type), type2char(TYPEOF(buf)));
@@ -435,11 +486,14 @@ SEXP extract_env(cw_unpack_context *cxt) {
   ASSERT(cxt->item.type == CWP_ITEM_MAP);
   ASSERT(TYPEOF(cxt->opts->dict) == ENVSXP);
   int nkeys = cxt->item.as.map.size;
+  add_pending(cxt, 2*nkeys);
   SEXP env = PROTECT(new_env(cxt->opts->dict));
   for (int i = 0; i < nkeys; i++) {
     cw_unpack_next_or_fail(cxt);
+    cxt->opts->pending--;
     SEXP key = PROTECT(always_make_charsxp_from_context(cxt));
     SEXP value = PROTECT(extract_sexp(cxt));
+    cxt->opts->pending--;
     if (LENGTH(key) == 0) {
       WARN_ONCE("Item with empty name was discarded");
     } else {
@@ -484,13 +538,24 @@ SEXP make_charsxp_or_raw_from_context(cw_unpack_context *cxt) {
 
 
 SEXP make_raw_from_context(cw_unpack_context *cxt) {
-  ASSERT(cxt->item.type == CWP_ITEM_BIN || cxt->item.type == CWP_ITEM_STR);
   uint32_t len = cxt->item.as.str.length;
   SEXP out = PROTECT(allocVector(RAWSXP, len));
   memcpy(RAW(out), cxt->item.as.str.start, len * sizeof(uint8_t));
   UNPROTECT(1);
   return out;
 }
+
+
+SEXP make_ext_from_context(cw_unpack_context *cxt) {
+  char typename[32];
+  WARN_ONCE("Extension type %d decoded as raw", cxt->item.type);
+  snprintf(typename, sizeof(typename)/sizeof(char), "ext%d", cxt->item.type);
+  SEXP out = PROTECT(make_raw_from_context(cxt));
+  setAttrib(out, R_ClassSymbol, ScalarString(mkChar(typename)));
+  UNPROTECT(1);
+  return out;
+}
+
 
 SEXP make_charsxp_or_null(cw_unpack_context *cxt) {
   if (cxt->item.type == CWP_ITEM_STR || cxt->item.type == CWP_ITEM_BIN) {
@@ -524,6 +589,7 @@ SEXP make_charsxp_or_null(cw_unpack_context *cxt) {
     return R_NilValue;
   }
 }
+
 
 SEXP always_make_charsxp_from_context(cw_unpack_context *cxt) {
   SEXP x = PROTECT(make_charsxp_or_null(cxt));
@@ -570,9 +636,21 @@ SEXPTYPE type_to_sexptype(int t) {
   case CWP_ITEM_FLOAT:
   case CWP_ITEM_DOUBLE: return REALSXP;
   case CWP_ITEM_STR: return STRSXP;
-  default: return VECSXP;
+  default:
+    {
+      if (t <= CWP_ITEM_MAX_USER_EXT
+          && t >= CWP_ITEM_MIN_USER_EXT) {
+        return RAWSXP;
+      } else if (t <= CWP_ITEM_MAX_RESERVED_EXT
+                 && t >= CWP_ITEM_MIN_RESERVED_EXT) {
+        return RAWSXP;
+      } else {
+        return VECSXP;
+      }
+    }
   }
 }
+
 
 const char *decode_item_type(cwpack_item_types x) {
   switch(x) {
@@ -593,7 +671,7 @@ const char *decode_item_type(cwpack_item_types x) {
       return "CWP_ITEM_USER_EXT(n)";
     } else if (x <= CWP_ITEM_MAX_RESERVED_EXT
                && x >= CWP_ITEM_MIN_RESERVED_EXT) {
-      return "CWP_ITEM_RESERVER_EXT(n)";
+      return "CWP_ITEM_RESERVED_EXT(n)";
     } else {
       return "???";
     }

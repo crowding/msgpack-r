@@ -8,11 +8,14 @@ typedef struct unpack_opts {
   int use_df;
   int simplify;
   SEXP package;
+  unsigned int max_depth;
+  unsigned long max_pending;
 
   /* state variables used in unpack */
   SEXP buf;
-  int buf_index;
-  int depth;
+  PROTECT_INDEX buf_index;
+  unsigned int depth;
+  unsigned long pending;
 
   /* State variables used in read */
   SEXP conn;

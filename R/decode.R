@@ -1,5 +1,6 @@
 #' Unpack a raw byte object in msgpack format into an R data object.
-#' @return an R data object.
+#' @return [unpackMsg(x)] returns one decoded message (which might be
+#'   shorter than the input raw), or throws an error.
 #'
 #' The msgpack format does not have typed arrays, so all msgpack
 #' arrays are effectively lists from the R perspective. However, if an
@@ -14,13 +15,17 @@
 #' Msgpack also does not distinguish between `NA` and `NULL`. All nils
 #' will be decoded as NA.
 #'
-#' Strings are read as UTF-8. If a msgpack string does not appear to
-#' be valid UTF-8, a warning is printed and a raw object is produced
-#' instead.
+#' Strings are assumed to be UTF-8 encoded. If a msgpack string does
+#' not appear to be valid UTF-8, a warning is printed and a raw object
+#' is produced instead.
 #'
-#' R does not implement vector names or environment keys as anything
-#' other than string. If a non-string appears as key in a msgpack
-#' dict, it will be converted to string with `dput()`.
+#' Msgpack allows any type to be the key of a dict, but R only
+#' supports strings in vector names or environment keys. If a
+#' non-string appears as key in a msgpack dict, it will be converted
+#' to string with [deparse()].
+#'
+#' Extension types will be decoded as raw objects with a class like
+#' `"ext120"` and a warning.
 #'
 #' @useDynLib msgpackr _unpack_msg
 #' @export
@@ -30,19 +35,20 @@ unpackMsg <- function(x, ...) {
 
 #' Extract a number of msgpack messages from a raw object.
 #'
-#' @param x A raw object.
+#' @param x [raw()] byte data, such as read using [readBin()].
 #' @param n How many messages to read. An "NA" here means to read as
 #'   much as possible.
 #' @param ... Unpacking parameters (see [unpackOpts()])
-#' @return A list A with three elements: `A$messages` is a list of the
-#'   messages read. a$remaining is a [raw()] vector of remaingin data
-#'   that is not read. "status" is a character indicating why parsing
-#'   stopped.
+#' @return [unpackMsgs(r, n)] returns a list `X` with three elements:
+#'   `X$msgs` is a list of the messages unpacked. `X$remaining` is a
+#'   [raw()] vector of data that was not unpacked. `x$status` is a
+#'   character value indicating why parsing stopped.
 #'
-#' Some status values are `"ok"` meaning that the requested number of
-#' messages was read; `"end of input"` meaning a smaller number of
-#' messages was read; and `"buffer underflow"` meaning that input
-#' ended with a partially completed message. Other status values
+#' Some status values you many want to check for are `"ok"` meaning
+#' that the requested number of messages was read; `"end of input"`
+#' meaning a smaller number of messages was read; and
+#' `"buffer underflow"` meaning that we were in the middle of a
+#' message when the end of input was reached. Other status values
 #' indicate errors encountered in parsing.
 #' @export
 #' @useDynLib msgpackr _unpack_msg_partial
@@ -53,28 +59,29 @@ unpackMsgs <- function(x, n=NA, ...) {
   status <- "ok"
 
   opts = unpackOpts(...)
+  if (is.na(n))
+    n <- .Machine$integer.max
   tryCatch(
-    while ((is.na(n) || nmsgs < n) && status == "ok") {
+    while (nmsgs < n && status == "ok") {
       result <- .Call(`_unpack_msg_partial`, x, offset, opts)
       nmsgs <- nmsgs + 1
       messages[[nmsgs]] <- result[[1]] #message
       offset <- offset + result[[2]] #bytes read
       status <- result[[3]] #return status
-      if (nmsgs == length(messages))
+      if (nmsgs == length(messages)) {
         length(messages) <- 2 * length(messages)
+      }
     }, error = function(e) {
       status <<- e$message
     })
   length(messages) <- nmsgs
-  list(messages = messages,
+  list(msgs = messages,
        remaining = if (offset < length(x))
                      x[(offset+1):length(x)]
                    else raw(0),
         status = status)
 }
 
-#' @useDynLib msgpackr _unpack_opts
-#' @param dat [raw()] byte data, such as read using [readBin()].
 #' @param simplify Controls how to unpack msgpack arrays. `TRUE`, the
 #'   default, will unpack arrays into the simplest available type of
 #'   vector. `FALSE` here will always unpack arrays into lists.
@@ -86,20 +93,25 @@ unpackMsgs <- function(x, n=NA, ...) {
 #' @param df When `TRUE`, msgpack dicts, whose elements are all arrays
 #'   having the same length, are converted to [data.frame()]s.
 #'
-#' unpackOpts interprets the options that
+#' [unpackOpts()] interprets the options that are common to
+#' [unpackMsgs()], [unpackMsg()], and [msgConnection()].
+#' @rdname unpackMsg
+#' @useDynLib msgpackr _unpack_opts
 unpackOpts <- function(parent = NULL,
                        df = TRUE,
-                       simplify = TRUE) {
+                       simplify = TRUE,
+                       max_size = NA,
+                       max_depth = NA) {
   .Call(`_unpack_opts`,
         parent,
         df,
         simplify,
-        parent.env(environment()));
+        parent.env(environment()),
+        max_size,
+        max_depth);
 }
 
-# use dput to come up with a name when a non-string is used as key.
+# Come up with a name when a non-string is used as key.
 repr <- function(x) {
-  con <- textConnection(NULL, "w")
-  dput(x, con, c("keepNA"))
-  textConnectionValue(con)
+  paste0(deparse(x, control = c("keepNA")), collapse="")
 }
