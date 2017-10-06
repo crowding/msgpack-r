@@ -10,13 +10,13 @@
 \alias{readMsg}
 \alias{writeMsg}
 \alias{writeMsgs}
-\title{Read and write msgpack messages using connections.}
+\title{Read and write msgpack messages using a connection.}
 \usage{
 msgConnection(conn, read_size = 2^16, max_size = NA, ...)
 
-partial(x)
+partial(conn)
 
-\method{partial}{msgConnection}(x)
+\method{partial}{msgConnection}(conn)
 
 readMsgs(conn, n = NA, ...)
 
@@ -38,10 +38,14 @@ writeMsgs(objs, conn, ...)
 \item{max_size}{The largest partial uncompleted message to
 store. \code{NA} means do not enforce a limit.}
 
-\item{...}{Packing options (see \link{packMsg})}
+\item{...}{Unpacking options (see \link{unpackMsg}).}
 
 \item{n}{The maximum number of messages to read. A value of NA
 means to parse all available messages up until the end of input.}
+
+\item{obj}{An R object.}
+
+\item{objs}{A list of R objects.}
 }
 \value{
 \code{\link[=msgConnection]{msgConnection()}} returns an object of class 'msgConnection'
@@ -53,30 +57,43 @@ nonblocking connection, and it will not work to mix readMsg and
 readBin on the same connection.
 
 In the present implementation, decoding must start over at the
-beginning of the message when is split across two or more
-objects. So \code{read_size} should be set to something larger than the
+beginning of the message when it is split across two or more
+chunks. So \code{read_size} should be set to something larger than the
 typical message recieved.
+
+If you are reading data from an untrusted source you will probably want
+to set option \code{max_size} (see \link{unpackOpts}).  This
+protects against stack overflows and out-of-memory errors that
+could be caused by some messages.
 
 Reading from connections is somewhat experimental at the
 moment. Please report problems you encounter.
 
-\link{readMsgs(conn, n)} returns a list of some length between 0
+\code{readMsgs(conn, n)} returns a list of some length between 0
 and n, containing the decoded messages.
 
-\link{status(conn)} returns the status of msgpack decoding on the
+\code{status(conn)} returns the status of msgpack decoding on the
 connection. A value of \code{"ok"} indicates all requested messages
 were read, \code{"buffer underflow"} indicates a partial message is on
 the line, \code{"end of input"} means the last available message has
 been read.  Other values indicate errors encountered in decoding,
 which will effectively halt reading.
 
-\link{readMsg(conn)} returns exactly one message, or throws an error.
+\code{readMsg(conn)} returns exactly one message, or throws an error.
 }
 \description{
-Read and write msgpack messages using connections.
+Read and write msgpack messages using a connection.
 
-\link{writeMsgs(l, conn)} writes a list of
-messages to a connection. That is, writeMsg(1:10) writes one
-message containing an array, while \link{writeMsgs(1:10, conn)} writes
+\code{writeMsgs(l, conn)} writes a list of
+messages to a connection. That is, \code{writeMsg(1:10, conn)} writes one
+message containing an array, while \code{writeMsgs(1:10, conn)} writes
 ten consecutive messages each containing one integer.
+}
+\examples{
+out <- rawConnection(raw(0), open="wb")
+apply(quakes, 1, function(x) writeMsg(x, out))
+length(rawConnectionValue(out))
+inn <- msgConnection(rawConnection(rawConnectionValue(out), open="rb"))
+readMsg(inn)
+readMsgs(inn, 3)
 }

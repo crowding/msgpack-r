@@ -3,6 +3,15 @@
 
 #include <RInternals.h>
 
+/* To hand options down from R code into the callbacks, I attach this
+   options structure to the CWpack state structures. 
+   
+   These structures exist at R level as the contents of some RAWSXP.
+   This seems safe enough. But part of these structures are also
+   pointers to SEXPs. I cover for this by also holding the SEXP
+   pointers as an attrubute. But this feels tacky.
+*/
+
 typedef struct unpack_opts {
   SEXP dict;
   int use_df;

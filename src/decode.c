@@ -69,7 +69,6 @@ SEXP _unpack_opts(SEXP dict,
 }
 
 
-
 int init_unpack_context(cw_unpack_context *cxt,
                         SEXP optsxp,
                         SEXP dat,
@@ -471,7 +470,7 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
     SEXP rn = PROTECT(eval(call, R_BaseEnv));
     setAttrib(buf, R_RowNamesSymbol, rn);
     setAttrib(buf, R_ClassSymbol, ScalarString(mkChar("data.frame")));
-    UNPROTECT(1);
+    UNPROTECT(2);
   }
 
   LOGD("Returning a %s", type2char(TYPEOF(buf)));

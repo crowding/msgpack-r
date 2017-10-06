@@ -1,10 +1,10 @@
-#' Read and write msgpack messages using connections.
+#' Read and write msgpack messages using a connection.
 #'
 #' @param conn A [connection] object open in binary mode.
 #' @param max_size The largest partial uncompleted message to
 #'   store. `NA` means do not enforce a limit.
 #' @param read_size How many bytes to read at a time.
-#' @param ... Packing options (see [packMsg])
+#' @param ... Unpacking options (see [unpackMsg]).
 #' @return [msgConnection()] returns an object of class 'msgConnection'
 #'
 #' Because msgpack messages have unpredictable length, the decoder
@@ -14,13 +14,24 @@
 #' readBin on the same connection.
 #'
 #' In the present implementation, decoding must start over at the
-#' beginning of the message when is split across two or more
-#' objects. So `read_size` should be set to something larger than the
+#' beginning of the message when it is split across two or more
+#' chunks. So `read_size` should be set to something larger than the
 #' typical message recieved.
+#'
+#' If you are reading data from an untrusted source you will probably want
+#' to set option `max_size` (see [unpackOpts]).  This
+#' protects against stack overflows and out-of-memory errors that
+#' could be caused by some messages.
 #'
 #' Reading from connections is somewhat experimental at the
 #' moment. Please report problems you encounter.
-#'
+#' @examples
+#' out <- rawConnection(raw(0), open="wb")
+#' apply(quakes, 1, function(x) writeMsg(x, out))
+#' length(rawConnectionValue(out))
+#' inn <- msgConnection(rawConnection(rawConnectionValue(out), open="rb"))
+#' readMsg(inn)
+#' readMsgs(inn, 3)
 #' @export
 msgConnection <- function(conn, read_size=2^16, max_size=NA, ...) {
   partial = raw(0)
@@ -112,19 +123,19 @@ addClass <- function(x, classes) structure(x, class = c(classes, class(x)))
 
 #' @rdname msgConnection
 #' @export
-partial <- function(x) UseMethod("partial")
+partial <- function(conn) UseMethod("partial")
 
 #' @rdname msgConnection
 #' @export
-partial.msgConnection <- function(x) {
-  attr(x, "reader")$partial
+partial.msgConnection <- function(conn) {
+  attr(conn, "reader")$partial
 }
 
 #' @rdname msgConnection
 #' @export
 #' @param n The maximum number of messages to read. A value of NA
 #'   means to parse all available messages up until the end of input.
-#' @return [readMsgs(conn, n)] returns a list of some length between 0
+#' @return `readMsgs(conn, n)` returns a list of some length between 0
 #'   and n, containing the decoded messages.
 readMsgs <- function(conn, n = NA, ...) {
   UseMethod("readMsgs")
@@ -136,7 +147,7 @@ readMsgs.msgConnection <- function(conn, n = NA, ...) {
 }
 
 #' @rdname msgConnection
-#' @return [status(conn)] returns the status of msgpack decoding on the
+#' @return `status(conn)` returns the status of msgpack decoding on the
 #'   connection. A value of `"ok"` indicates all requested messages
 #'   were read, `"buffer underflow"` indicates a partial message is on
 #'   the line, `"end of input"` means the last available message has
@@ -152,7 +163,7 @@ status.msgConnection <- function(conn) {
 }
 
 #' @rdname msgConnection
-#' @return [readMsg(conn)] returns exactly one message, or throws an error.
+#' @return `readMsg(conn)` returns exactly one message, or throws an error.
 #' @export
 readMsg <- function(conn, ...) {
   x <- readMsgs(conn, 1, ...)
@@ -164,18 +175,20 @@ readMsg <- function(conn, ...) {
 
 #' @rdname msgConnection
 #' @export
+#' @param obj An R object.
 writeMsg <- function(obj, conn, ...) {
   writeBin(packMsg(obj, ...), conn)
 }
 
 #' ...
 #'
-#' [writeMsgs(l, conn)] writes a list of
-#'   messages to a connection. That is, writeMsg(1:10) writes one
-#'   message containing an array, while [writeMsgs(1:10, conn)] writes
+#' `writeMsgs(l, conn)` writes a list of
+#'   messages to a connection. That is, `writeMsg(1:10, conn)` writes one
+#'   message containing an array, while `writeMsgs(1:10, conn)` writes
 #'   ten consecutive messages each containing one integer.
 #' @rdname msgConnection
 #' @export
+#' @param objs A list of R objects.
 writeMsgs <- function(objs, conn, ...) {
   writeBin(packMsgs(objs), conn)
 }

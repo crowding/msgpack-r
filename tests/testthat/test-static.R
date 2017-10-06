@@ -136,7 +136,6 @@ test_that("extension mechanism", {
 
 test_that("recursive use of msgpack works", {
   assign(envir = globalenv(), "prepack.blob", function(x) packMsg(unclass(x)))
-
   obj <- "hello"
   class(obj) <- "blob"
   typeof(unpackMsg(packMsg(obj))) %is% "raw"
@@ -193,7 +192,6 @@ test_that("always emit strings in UTF8,", {
 
 test_that("use ints for integral floats under 32 bits", {
   packMsg(1) %is% packMsg(1L)
-
   length(packMsg(2^32)) %is% 5
   length(packMsg(2^32+1)) %is% 9
   length(packMsg(-2^31)) %is% 5
@@ -208,7 +206,6 @@ test_that("as_is uses arrays even for singletons", {
   length(packMsg(list(1, 2, 3), as_is = TRUE)) %is% 7
   unpackMsg(packMsg(list(1, 2, 3))) %is% c(1, 2, 3)
   unpackMsg(packMsg(list(1, 2, 3), as_is = TRUE)) %is% list(1, 2, 3)
-
   length(packMsg(I(1), as_is=FALSE)) %is% 2
 })
 
@@ -227,7 +224,6 @@ test_that("pack named vectors into dicts", {
 
 test_that("Unpack dicts into envs", {
   unpackMsg(packMsg(list2env(list(a=1, b=2)))) %is% c(a=1, b=2)
-
   x <- new.env()
   e <- unpackMsg(packMsg(list(a = 1, b = NA)), parent = x)
   typeof(e) %is% "environment"
@@ -271,7 +267,6 @@ test_that("NA names, dots names...", {
   n <- c("two", NA, "...", "..5", "")
   names(x) <- n
   names(unpackMsg(packMsg(x))) %is% n
-
   expect_warning(e <- unpackMsg(packMsg(x), parent=environment()))
   ls(e, all.names=TRUE) %is% c("NA", "two")
 })

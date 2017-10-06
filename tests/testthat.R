@@ -1,4 +1,4 @@
 library(testthat)
-library(msgpackr)
+library(msgpack)
 
-test_check("msgpackr")
+test_check("msgpack")

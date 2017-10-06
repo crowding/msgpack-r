@@ -2,15 +2,25 @@
 % Please edit documentation in R/decode.R
 \name{unpackMsg}
 \alias{unpackMsg}
+\alias{unpackMsgs}
 \alias{unpackOpts}
-\title{Unpack a raw byte object in msgpack format into an R data object.}
+\title{Unpack raw objects in msgpack format into R data structures.}
 \usage{
 unpackMsg(x, ...)
+
+unpackMsgs(x, n = NA, ...)
 
 unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
   max_depth = NA)
 }
 \arguments{
+\item{x}{A \code{\link[=raw]{raw()}} object, perhaps read from a file or socket.}
+
+\item{...}{Options passed to \link{unpackOpts}.}
+
+\item{n}{How many messages to read. An "NA" here means to read as
+much as possible.}
+
 \item{parent}{If an environment is given, (such as \code{\link[=emptyenv]{emptyenv()}}),
 msgpack dicts will be unpacked into environment objects, with the
 given value as parent. Otherwise dicts will be unpacked into
@@ -22,13 +32,9 @@ having the same length, are converted to \code{\link[=data.frame]{data.frame()}}
 
 \code{\link[=unpackOpts]{unpackOpts()}} interprets the options that are common to
 \code{\link[=unpackMsgs]{unpackMsgs()}}, \code{\link[=unpackMsg]{unpackMsg()}}, and \code{\link[=msgConnection]{msgConnection()}}.}
-
-\item{simplify}{Controls how to unpack msgpack arrays. \code{TRUE}, the
-default, will unpack arrays into the simplest available type of
-vector. \code{FALSE} here will always unpack arrays into lists.}
 }
 \value{
-\link{unpackMsg(x)} returns one decoded message (which might be
+\code{unpackMsg(x)} returns one decoded message (which might be
 shorter than the input raw), or throws an error.
 
 The msgpack format does not have typed arrays, so all msgpack
@@ -49,13 +55,37 @@ not appear to be valid UTF-8, a warning is printed and a raw object
 is produced instead.
 
 Msgpack allows any type to be the key of a dict, but R only
-supports strings in vector names or environment keys. If a
-non-string appears as key in a msgpack dict, it will be converted
-to string with \code{\link[=deparse]{deparse()}}.
+supports strings. If a non-string appears as key in a msgpack dict,
+it will be converted to string with \code{\link[=deparse]{deparse()}}.
 
 Extension types will be decoded as raw objects with a class like
 \code{"ext120"} and a warning.
+
+\code{unpackMsgs(r, n)} returns a list \code{X} with three elements:
+\code{X$msgs} is a list of the messages unpacked. \code{X$remaining} is a
+\link{raw} vector of data that was not unpacked. \code{x$status} is a
+character value indicating why parsing stopped.
+
+Some status values you may want to check for are \code{"ok"} meaning
+that the requested number of messages was read; \code{"end of input"}
+meaning a smaller number of messages was read; and
+\code{"buffer underflow"} meaning that we were in the middle of a
+message when the end of input was reached. Other status values
+indicate errors encountered in parsing.
 }
 \description{
-Unpack a raw byte object in msgpack format into an R data object.
+Unpack raw objects in msgpack format into R data structures.
+
+Extract a number of msgpack messages from a raw object.
+
+\code{\link[=unpackOpts]{unpackOpts()}} interprets the options that are common to
+\code{\link[=unpackMsgs]{unpackMsgs()}}, \code{\link[=unpackMsg]{unpackMsg()}}, and \code{\link[=msgConnection]{msgConnection()}}. It is not
+exported.
+}
+\examples{
+msg <- as.raw(c(0x82, 0xa7, 0x63, 0x6f, 0x6d, 0x70, 0x61, 0x63, 0x74, 0xc3,
+                0xa6, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x00))
+unpackMsg(msg)
+x <- packMsgs(list("one", "two", "three"))
+unpackMsgs(x, 2)
 }

@@ -1,0 +1,547 @@
+#---
+#title: Speed of R Import and Export data in Various Packages
+#output: rmarkdown::html_vignette
+#vignette: >
+#  %\VignetteEngine{knitr::rmarkdown}
+#  %\VignetteIndexEntry{Speed of R Import and Export data in Various Packages}
+#  \usepackage[utf8]{inputenc}
+#---
+
+It's good to get data into and out of R! More compatibility between
+different formats is better. But... which formats are fastest?
+
+First, we will need a reference dataset to work with. I'll pick the
+NYC flights dataset since it's large enough to take some time to
+process.
+
+Next, we'll pick some metrics. Here are a few I am interested in.
+
+* wall clock time from beginning to end of task;
+* CPU process time used as recorded by the OS
+* total time spent to encode (to memory)
+* total time spent to decode (from memory)
+* total time spent to encode, transmit to another process on the same
+  computer, and decode
+* total number of bytes used
+* all the above but with a layer of gzip used on top of the encoding
+
+Here are all the libraries we will deal with. But since some of the
+names clobber others I will have to load and install them in segments.
+
+NOTE: also investigate YAML read/write, and HTML read/write?
+
+```{R}
+
+ps <- install.packages(c("nycflights13", "jsonlite", "msgpack", "msgpackR",
+                         "ndjson", "rjson", "RJSONIO"))
+
+# "tidyjson"
+
+```
+
+Note that this is not a completely apples-to-apples comparison, since
+the different formats have different capabilities and
+purposes:
+
+* `serialize()` is your best best for getting R objects out of
+  and back into R the way you had them.
+* `dump()` is your next best bet, while being a somewhat
+  human-readable text format.
+* JSON is widely used on the web, but because it is based on
+  Javascript data structures, it doesn't easily represent all of R
+  losslessly; attributes like dims and classes don't have equivalents
+  in Javascript.
+* CSV is ubiquitous and can be read by most anything but only represents
+  tabular data. Its data types are ambiguous.
+* Msgpack is similar in capabilities to JSON but is a binary format
+  with more compact and faster encoding.
+* Some of these packages encode data frames by column (more compact)
+  and others encode data frames by row (more common with JSON style APIs.)
+
+To measure performance in reading / writing over connections, I will
+write a dataset from one forked R process to another on the same
+machine. The dataset will be loaded into memory before the child
+process is forked, then the child process encodes and writes to the
+master process, which decodes. Timings are taken on both sides of the
+connection, and we can examine the roundtrip-formatted data in the
+master process afterwards.
+
+First we'll wrap up `mcfork` and all its required error handling.
+
+```{R forking}
+library(promises)
+library(dplyr)
+library(magrittr)
+library(tibble)
+
+attach_env <- function(arg_, ...) {
+  target <- new.env(parent = env(arg_))
+  for (i in list(...)) {
+    e <- as.environment(i)
+    # think about "inject_env" here
+    inject(e, target)
+  }
+  env(arg_) <- target
+}
+
+inject <- function(from, to_env) {
+  f <- as.environment(from)
+  dots2env(as.dots(f), envir = to_env)
+}
+
+forked <- function(ifParent, ifChild) {
+  #   Fork the R process. In the parent process call ifParent(), in
+  #   the child process call ifChild(). Return a list of return value of
+  #   both functions, or error messages.
+  other <- parallel:::mcfork()
+  if (inherits(other, "masterProcess")) {
+    # we are child process
+    tryCatch({
+      result <- ifChild(x)
+      #cat("ran child\n")
+      parallel:::mcexit(0, send=result)
+    },
+    error =
+        function(err) {
+            ##cat("child error\n")
+            parallel:::mcexit(1, send=err)
+      }
+    )
+  } else {
+    # we are master process
+    mine <- tryCatch(ifParent(x), error = identity)
+    #cat("ran parent\n");
+    theirs <- tryCatch(unserialize(parallel:::readChild(other)), error=identity)
+    #cat("read from child\n");
+    Sys.sleep(1) #wait for child to finish?
+    child_pids <- vapply(parallel:::children(), function(x) x$pid, 0) 
+    if (other$pid %in% child_pids) {
+      warning("Killing child process ", deparse(other))
+      parallel:::mckill(other, tools::SIGTERM)
+    }
+    c(theirs, mine)
+  }
+}
+```
+
+Functions to time encoding and decoding in various scenarios:
+
+```{R timingMethods}
+return_result <- FALSE
+# Function accepts a set of sys.time readings and computes timings
+times <- function(start.write, end.write,
+                  start.read, end.read,
+                  bytes, result,
+                  start.parent, end.parent, ...) {
+    c(list(extra=list(list(...))),
+      if (missing(end.read)) list() else
+          c(read.user = end.read[["user.self"]] - start.read[["user.self"]],
+            read.sys = end.read[["sys.self"]] - start.read[["sys.self"]],
+            read.elapsed = end.read[["elapsed"]] - start.read[["elapsed"]],
+            write.user = end.write[["user.self"]] - start.write[["user.self"]],
+            write.sys = end.write[["sys.self"]] - start.write[["sys.self"]],
+            write.elapsed = end.write[["elapsed"]] - start.write[["elapsed"]],
+            total.user = (end.read[["user.self"]] + end.write[["user.self"]]
+                - start.write[["user.self"]] - start.read[["user.self"]]),
+            total.sys = (end.read[["sys.self"]] + end.write[["sys.self"]]
+                - start.write[["sys.self"]] - start.read[["sys.self"]]),
+            total.elapsed = ( max(end.write[["elapsed"]], end.read[["elapsed"]])
+                - min(start.write[["elapsed"]], start.read[["elapsed"]]))),
+      bytes = if (missing(bytes)) list() else bytes, 
+      result = if (missing(result) || !return_result) list() else list(result),
+      parent = if (missing(start.parent)) list()
+               else c(user = (end.parent[["user.self"]] - start.parent[["user.self"]]),
+                      sys = (end.parent[["sys.self"]] - start.parent[["sys.self"]]),
+                      elapsed = (end.parent[["elapsed"]] - start.parent[["elapsed"]])))
+}
+
+bytes <- function(x) {
+    switch(mode(x),
+           raw = {
+               length(x)
+           },
+           character = {
+               length(x) + sum(nchar(x))
+           })
+}
+
+timeConvert <- function(data,
+                        from = unserialize,
+                        to =  function(data) serialize(data,NULL)) {
+    force(data)
+    start.write <- proc.time()
+    enc <- to(data)
+    end.write <- proc.time()
+    
+    as.read <- from(enc)
+    end.read <- proc.time()
+    bytes <- bytes(enc)
+    times(start.write, end.write,
+          end.write, end.read,
+          bytes(enc), as.read)
+}
+
+
+timeRawConnection <- function(data, reader=unserialize, writer=serialize,
+                              wrap = identity) {
+  force(data)    
+  conn <- rawConnection(raw(0), open="wb")
+  on.exit(close(conn), add=TRUE)
+  start.write <- proc.time()
+  writer(data, conn)
+  end.write <- proc.time()
+  bytes <- rawConnectionValue(conn)
+  conn2 <- wrap(rawConnection(bytes, open="rb"))
+  on.exit(close(conn2), add=TRUE)
+  start.read <- proc.time()
+  as.read <- reader(conn2)
+  end.read <- proc.time()
+  times(start.write, end.write,
+        end.write, end.read,
+        length(bytes), as.read)
+}
+
+timeTextConnection <- function(data,
+                               reader = function(x) source(x, TRUE),
+                               writer = function(x, conn) dump("x", conn),
+                               wrap = identity) {
+  force(data)        
+  theText <- character(0)
+  conn <- wrap(textConnection(NULL, open="w"))
+  on.exit(close(conn), add=TRUE)
+  start.write <- proc.time()
+  writer(data, conn)
+  end.write <- proc.time()
+  theText <- textConnectionValue(conn)
+  nbytes <- sum(nchar(theText)) + length(theText) #count linebreaks as a byte
+  conn2 <- textConnection(theText, open="r")
+  on.exit(close(conn2), add=TRUE)
+  start.read <- proc.time()
+  as.read <- reader(conn2)
+  end.read <- proc.time()
+  times(start.write, end.write,
+        end.write, end.read,
+        nbytes, as.read)
+}
+
+timeFileIO <- function(data, reader=unserialize, writer=serialize, raw=TRUE, wrap = identity) {
+    force(data)
+    fnam <- tempfile()
+    cat(fnam, "\n")
+    on.exit(unlink(fnam, force=TRUE))
+    con <- wrap(file(fnam, open="w", raw=raw))
+    start.write <- proc.time()
+    writer(data, con)
+    nbytes <- seek(con)
+    close(con)
+    end.write <- proc.time()
+    con <- file(fnam, open="r", raw=raw)
+    start.read <- proc.time()
+    as.read <- reader(con)
+    end.read <- proc.time()
+    times(start.write, end.write,
+          start.read, end.read,
+          nbytes, as.read)
+}
+
+port <- 42170
+timeSocketTransfer <- function(data, reader = unserialize, writer = serialize,
+                               wrap = identity) {
+  force(data)    
+  doRead <- function(other) {
+    conn <- socketConnection(port = port, server=TRUE, open="rb")
+    on.exit(close(conn))
+    start.read <- proc.time()
+    as.read <- reader(conn)
+    end.read <- proc.time()
+    list(start.read = start.read,
+         end.read = end.read,
+         result = as.read)
+  }
+  doWrite <- function(other) {
+    conn <- socketConnection(port = port, server=FALSE, open = "wb")
+    start.write <- proc.time()
+    on.exit(close(conn))
+    writer(data, conn)
+    flush(conn)
+    end.write <- proc.time()
+    list(start.write = start.write,
+         end.write = end.write, bytes=NA)
+  }
+  start.parent <- proc.time()
+  results <- forked(ifChild = doWrite, ifParent = doRead)
+  end.parent <- proc.time()
+
+  do.call(times, c(results,
+                   list(start.parent = start.parent, end.parent = end.parent)),
+          quote=TRUE)
+}
+
+timeFifoTransfer <- function(data,
+                             reader = unserialize,
+                             writer = serialize,
+                             wrap = identity) {
+  force(data)    
+  fnam <- tempfile()
+  on.exit(unlink(fnam, force = TRUE))
+  cat(fnam, "\n")
+  system(paste("mkfifo", fnam))
+
+  doRead <- function(other) {
+    Sys.sleep(1)
+    conn <- fifo(fnam, open = "rb", blocking = TRUE)
+    on.exit({
+      close(conn)
+    })
+    start.read <- proc.time()
+    as.read <- reader(conn)
+    end.read <- proc.time()
+    list(start.read = start.read,
+         end.read = end.read,
+         result = as.read)
+  }
+  doWrite <- function(other) {
+    conn <- fifo(fnam, open = "wb", blocking = TRUE)
+    on.exit({
+      close(conn)
+    })
+    start.write <- proc.time()
+    writer(data, conn)
+    flush(conn)
+    end.write <- proc.time()
+    list(start.write = start.write,
+         end.write = end.write,
+         bytes = NA)
+  }
+
+  start.parent <- proc.time()
+  results <- forked(ifChild = doWrite, ifParent = doRead)
+  end.parent <- proc.time()
+
+  do.call(times, c(results,
+                   list(start.parent = start.parent,
+                        end.parent = end.parent)),
+          quote=TRUE)
+}
+
+timeCurve <- function(dataset, method, reader, writer,
+                      timeout = 60,
+                      start = 0.01,
+                      max = 1,
+                      wrap = identity
+                      ) {
+    results <- data_frame()
+    current <- start
+    while (current <= max) {
+        print(c(current=current))
+        data <- subsample(dataset,current)
+        result <- method(data, reader, writer, wrap = wrap)
+        results <- bind_rows(results, as_tibble(c(size = current, result)))
+        if ("total.elapsed" %in% names(result)) {
+            if (result$total.elapsed > timeout) break() else NULL
+        } else  {
+            break()
+        }
+        if (current == max) break()
+        current = min(current * sqrt(2), max)
+    }
+    results
+}
+
+readBuf <- function(con, n = NA_integer_, chunk=8192L) {
+    nread = 0L
+    buf <- rawConnection(raw(0), open="w") # use rawConnection as a buffer.
+    while(TRUE) {
+        req <- if (is.na(n)) chunk else min(chunk, n - nread)
+        result = readBin(con = con, what = "raw", n = req)
+        nr <- length(result)
+        nread <- nread + nr
+        writeBin(result, buf)
+        if (nr == 0) break
+    }
+    return(rawConnectionValue(buf))
+}
+
+```
+
+```{R}
+library(nycflights13)
+
+dataset <- as.list(as.environment("package:nycflights13"))
+timings <- list()
+
+subsample <- function(dataset, rate) {
+    lapply(dataset, function(df) {
+        df[1:(1 + round(nrow(df) * rate)), ]
+    })
+}
+
+onerow <- subsample(dataset, 0)
+```
+
+## R serialization
+
+```{R}
+timeConvert(dataset, unserialize, function(x) serialize(x, NULL))
+timeRawConnection(dataset, unserialize, serialize)
+timeFileIO(dataset, unserialize, serialize)
+```
+
+However, I have problems if I try to
+transfer too large an object over a fifo and read it with
+`unserialize().`
+
+```{R}
+(timeFifoTransfer(dataset, unserialize, serialize))
+```
+
+This appears to be because `unserialize` doesn't know how to finish
+reading a partial message. If I patiently assemble a full message for
+it, it works:
+
+```{R}
+timings$serialize$fifoSeq <-
+    timeFifoTransfer(dataset, . %>% readBuf %>% unserialize, serialize)
+timings$serialize$socketSeq <-
+    timeSocketTransfer(dataset, . %>% readBuf %>% unserialize, serialize)
+```
+
+
+# The O(N^2) Club
+
+Now, it turns out that some of the packages we're investigating have
+supralinear time complexity, and take approximately forever to read
+large messasges. So a dataset that is large enough to have a useful
+speed reading in a small library, might never finish in one of the
+slower libraries.
+
+Then text serialization via dput/source (which turns out to be horribly slow...)
+
+## Dput/source
+
+```{R}
+
+```
+
+```{R}
+library(ggplot2)
+## Annoyingly, the behavior of "dump" and "dput" depend on this global option 
+options(deparse.max.lines = NULL)
+
+timeCurve(dataset, timeConvert, deparse, function(t) eval(parse(text=t)))
+
+```
+
+Next we'll try jsonlite.
+
+
+```{R}
+library(jsonlite)
+
+json <- trial_subsample(timeout=10, dataset, timeConvert, fromJSON, toJSON)
+
+## Well it looks linear even if slow.
+
+## jsonlite streaming only supports transmission of data frames.
+## Since the test dataset is a collection of data frames, so we'll
+## have to fake it by streaming each in turn.
+
+## TODO: isn't this the same as readBuf above? Is there a perf difference?
+jsonlite_reader <- function(conn) {
+  append <- msgpack:::catenator()
+  stream_in(conn, handler = function(x) append(list(x)))
+  append(action="read")
+}
+
+jsonlite_writer <- function(data, conn) {
+  lapply(data, stream_out, conn)
+}
+
+timeConvert(dataset, reader=jsonlite_reader, writer=jsoinlite_writer)
+timeTextConnection(dataset, reader=jsonlite_reader, writer=jsonlite_writer)
+timeFifoTransfer(dataset, reader=jsonlite_reader, writer=jsonlite_writer)
+timeSocketTransfer(dataset, reader=jsonlite_reader, writer=jsonlite_writer)
+```
+
+```{R}
+ggplot(json) + aes(x=size, y=total.elapsed) + geom_line()
+ggplot(json) + aes(x=size, y=total.elapsed) + geom_line()
+```
+
+
+# Msgpack
+
+Now `msgpack` appears to have become
+
+```{R}
+library(msgpack)
+
+timeConvert(dataset, unpackMsg, packMsg)
+
+# note that msgpack requires a wrapper over the raw connection in order
+# to pull off partial reads.
+timeRawConnection(dataset,
+                  reader = readMsg, writer = writeMsg,
+                  wrap = msgConnection)
+
+## The second step fails here:
+mgc <- timeCurve(dataset,
+                 method = timeRawConnection,
+                 reader = readMsg,
+                 writer = writeMsg,
+                 wrap = msgConnection)
+
+## This is because of the performance loss in re-parsing after adding
+## each read block, I believe.  What I need to to is implement the msgpack
+## callback to reallocate the buffer and keep reading.
+
+length(packMsg(subsample(dataset, 0.005)))
+
+timeRawConnection(subsample(dataset, 0.005),
+                  reader = readMsg, writer = writeMsg,
+                  wrap = msgConnection)
+
+timeCurve(dataset,
+          start=0.001,
+          method = timeRawConnection,
+          reader = readMsg,
+          writer = writeMsg,
+          wrap = msgConnection)
+
+timeSocketConnection(anscombe, writer=writeMsg, reader=readMsg)
+
+
+
+```
+
+The time to read a long message is unacceptably o(N^2)
+
+## Streaming performance
+
+In networked and parallel computing applications we may be more
+concerned with sending and receiving many small messages instead of
+one large one. We're concerned with two aspects, one is throughput
+(messages / sec) and the other is latency (how fast messages are responded to).
+
+My test case will be to have one R process generate a large number of
+(randomized) observations, and encode and send them to another R
+process, which will decode them, and perform an aggregation.
+
+```
+
+```
+
+Break down the measures we will take:
+
+* Time Taken to Encode + Decode
+  * In memory, (either rawConnection or lowlevel method) in single process
+  * Over Connection
+
+  * Large Number of Small Messages
+  * Large Number of Query/Responses (e.g. number of requests served
+    from several forked processes?)
+
+* Bytes used to encode / decode
+  * a large dataset
+
+* 

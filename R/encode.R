@@ -12,8 +12,8 @@
 #'
 #' A hook for pre-processing R objects before packing is supported, by
 #' giving the object an S3 [class] and implementing a method
-#' "prepack". For instance, [prepack.data.frame(x)] simply adds the
-#' [AsIs] class to `x`.
+#' `prepack`. For instance, `prepack.data.frame(x)` simply adds the
+#' `"AsIs"` class to `x`.
 #'
 #' Environment objects are written with the keys in sorted order, but
 #' named vectors are written in the order which the entries appear.
@@ -21,8 +21,10 @@
 #' Object attributes other than `name` and `class` are ignored.
 #'
 #' @param ... Options controlling packing, as described on this page.
-#' @useDynLib msgpackr _pack_msg
+#' @useDynLib msgpack _pack_msg
 #' @return An object of class "raw".
+#' @examples
+#' packMsg( list(compact=TRUE, schema=0) )
 #' @export
 packMsg <- function(x, ...)  {
   .Call(`_pack_msg`, x, packOpts(...))
@@ -30,6 +32,9 @@ packMsg <- function(x, ...)  {
 
 #' @param xs a list of objects to pack.
 #' @rdname packMsg
+#' @examples
+#' x <- packMsgs(list("one", "two", "three"))
+#' unpackMsgs(x, 2)
 #' @export
 packMsgs <- function(xs, ...) {
  opts <- packOpts()
@@ -50,8 +55,9 @@ packMsgs <- function(xs, ...) {
 #'   for packing each message. Currently there is little reason to
 #'   change this.
 #' @rdname packMsg
-#' @useDynLib msgpackr _pack_opts
+#' @useDynLib msgpack _pack_opts
 packOpts = function(compatible = FALSE,
+#' @useDynLib msgpack _pack_opts
                     as_is = FALSE,
                     use_dict = TRUE,
                     max_size = NA,

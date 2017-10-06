@@ -35,8 +35,8 @@ not further pre-processed.
 
 A hook for pre-processing R objects before packing is supported, by
 giving the object an S3 \link{class} and implementing a method
-"prepack". For instance, \link{prepack.data.frame(x)} simply adds the
-\link{AsIs} class to \code{x}.
+\code{prepack}. For instance, \code{prepack.data.frame(x)} simply adds the
+\code{"AsIs"} class to \code{x}.
 
 Environment objects are written with the keys in sorted order, but
 named vectors are written in the order which the entries appear.
@@ -70,4 +70,9 @@ An object of class "raw".
 }
 \description{
 Encode an R object into a raw vector using msgpack.
+}
+\examples{
+packMsg( list(compact=TRUE, schema=0) )
+x <- packMsgs(list("one", "two", "three"))
+unpackMsgs(x, 2)
 }

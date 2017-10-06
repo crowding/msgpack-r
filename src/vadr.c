@@ -1,6 +1,6 @@
 #include "vadr.h"
-
 #include "cwpack.h"
+#include <R_ext/Rdynload.h>
 
 /* Assert that some object is a type. */
 void assert_type(SEXP x, SEXPTYPE type) {
@@ -32,3 +32,4 @@ const char *decode_return_code(int x) {
   default: return "unknown error";
   }
 }
+
