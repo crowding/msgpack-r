@@ -167,7 +167,8 @@ bytes <- function(x) {
 
 timeConvert <- function(data,
                         from = unserialize,
-                        to =  function(data) serialize(data,NULL)) {
+                        to =  function(data) serialize(data,NULL),
+                        wrap = identity) {
     force(data)
     start.write <- proc.time()
     enc <- to(data)
@@ -207,14 +208,14 @@ timeTextConnection <- function(data,
                                wrap = identity) {
   force(data)        
   theText <- character(0)
-  conn <- wrap(textConnection(NULL, open="w"))
+  conn <- textConnection(NULL, open="w")
   on.exit(close(conn), add=TRUE)
   start.write <- proc.time()
   writer(data, conn)
   end.write <- proc.time()
   theText <- textConnectionValue(conn)
   nbytes <- sum(nchar(theText)) + length(theText) #count linebreaks as a byte
-  conn2 <- textConnection(theText, open="r")
+  conn2 <- wrap(textConnection(theText, open="r"))
   on.exit(close(conn2), add=TRUE)
   start.read <- proc.time()
   as.read <- reader(conn2)
@@ -229,13 +230,14 @@ timeFileIO <- function(data, reader=unserialize, writer=serialize, raw=TRUE, wra
     fnam <- tempfile()
     cat(fnam, "\n")
     on.exit(unlink(fnam, force=TRUE))
-    con <- wrap(file(fnam, open="w", raw=raw))
+    con <- file(fnam, open=paste0("w", if(raw) "b" else ""), raw=raw)
     start.write <- proc.time()
     writer(data, con)
     nbytes <- seek(con)
     close(con)
     end.write <- proc.time()
-    con <- file(fnam, open="r", raw=raw)
+    con <- wrap(file(fnam, open=paste0("r", if(raw) "b" else ""), raw=raw))
+    on.exit(close(con), add=TRUE)
     start.read <- proc.time()
     as.read <- reader(con)
     end.read <- proc.time()
@@ -289,7 +291,7 @@ timeFifoTransfer <- function(data,
 
   doRead <- function(other) {
     Sys.sleep(1)
-    conn <- fifo(fnam, open = "rb", blocking = TRUE)
+    conn <- wrap(fifo(fnam, open = "rb", blocking = TRUE))
     on.exit({
       close(conn)
     })
@@ -420,16 +422,11 @@ Then text serialization via dput/source (which turns out to be horribly slow...)
 ## Dput/source
 
 ```{R}
-
-```
-
-```{R}
 library(ggplot2)
 ## Annoyingly, the behavior of "dump" and "dput" depend on this global option 
 options(deparse.max.lines = NULL)
 
 timeCurve(dataset, timeConvert, deparse, function(t) eval(parse(text=t)))
-
 ```
 
 Next we'll try jsonlite.
@@ -438,7 +435,7 @@ Next we'll try jsonlite.
 ```{R}
 library(jsonlite)
 
-json <- trial_subsample(timeout=10, dataset, timeConvert, fromJSON, toJSON)
+json <- timeCurve(timeout=10, dataset, timeConvert, fromJSON, toJSON)
 
 ## Well it looks linear even if slow.
 
@@ -457,7 +454,7 @@ jsonlite_writer <- function(data, conn) {
   lapply(data, stream_out, conn)
 }
 
-timeConvert(dataset, reader=jsonlite_reader, writer=jsoinlite_writer)
+timeConvert(dataset, reader=jsonlite_reader, writer=jsonlite_writer)
 timeTextConnection(dataset, reader=jsonlite_reader, writer=jsonlite_writer)
 timeFifoTransfer(dataset, reader=jsonlite_reader, writer=jsonlite_writer)
 timeSocketTransfer(dataset, reader=jsonlite_reader, writer=jsonlite_writer)
@@ -471,50 +468,48 @@ ggplot(json) + aes(x=size, y=total.elapsed) + geom_line()
 
 # Msgpack
 
-Now `msgpack` appears to have become
+Now `msgpack` appears to have some streaming issues with especially large messages.
 
 ```{R}
 library(msgpack)
 
 timeConvert(dataset, unpackMsg, packMsg)
 
-# note that msgpack requires a wrapper over the raw connection in order
-# to pull off partial reads.
-timeRawConnection(dataset,
-                  reader = readMsg, writer = writeMsg,
-                  wrap = msgConnection)
+## note that msgpack requires a wrapper over the raw connection in order
+## to pull off partial reads.
+msgpack.raw <- timeCurve(dataset,
+          start=0.001,
+          method = timeConvert,
+          reader = unpackMsg,
+          writer = packMsg,
+          wrap = msgConnection)
 
-## The second step fails here:
-mgc <- timeCurve(dataset,
-                 method = timeRawConnection,
-                 reader = readMsg,
-                 writer = writeMsg,
-                 wrap = msgConnection)
+msgpack.rawconn <- timeCurve(dataset,
+                             start=0.001,
+                             method = timeRawConnection,
+                             reader = readMsg,
+                             writer = writeMsg,
+                             wrap = msgConnection, timeout = 10)
+
+msgpack.socket <- timeCurve(dataset,
+                            start=0.001,
+                            method = timeFifoTransfer,
+                            reader = readMsg,
+                            writer = writeMsg,
+                            wrap = msgConnection, timeout=10)
+
+timeFileIO(subsample(dataset, 0.1), writer = writeMsg, reader = readMsg, wrap = msgConnection)
+timeFifoTransfer(subsample(dataset, 0.1), writer = writeMsg, reader = readMsg, wrap = msgConnection)
+
+## There appears to be some O(N^2) behavior with msgpack with
+## connections, but not in memory.
 
 ## This is because of the performance loss in re-parsing after adding
 ## each read block, I believe.  What I need to to is implement the msgpack
-## callback to reallocate the buffer and keep reading.
-
-length(packMsg(subsample(dataset, 0.005)))
-
-timeRawConnection(subsample(dataset, 0.005),
-                  reader = readMsg, writer = writeMsg,
-                  wrap = msgConnection)
-
-timeCurve(dataset,
-          start=0.001,
-          method = timeRawConnection,
-          reader = readMsg,
-          writer = writeMsg,
-          wrap = msgConnection)
-
-timeSocketConnection(anscombe, writer=writeMsg, reader=readMsg)
-
-
-
+## callback to reallocate the buffer and keep reading, making it an actually
+## reentrant API.
 ```
 
-The time to read a long message is unacceptably o(N^2)
 
 ## Streaming performance
 
@@ -527,21 +522,3 @@ My test case will be to have one R process generate a large number of
 (randomized) observations, and encode and send them to another R
 process, which will decode them, and perform an aggregation.
 
-```
-
-```
-
-Break down the measures we will take:
-
-* Time Taken to Encode + Decode
-  * In memory, (either rawConnection or lowlevel method) in single process
-  * Over Connection
-
-  * Large Number of Small Messages
-  * Large Number of Query/Responses (e.g. number of requests served
-    from several forked processes?)
-
-* Bytes used to encode / decode
-  * a large dataset
-
-* 
