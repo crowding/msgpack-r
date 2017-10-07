@@ -122,9 +122,17 @@ int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
 SEXP _unpack_msg_partial(SEXP buf, SEXP start, SEXP opts) {
   calls++;
   cw_unpack_context cxt;
+  LOG("buf is %x", RAW(buf));
+  LOG("start is %x", asInteger(start));
   int protections = init_unpack_context(&cxt, opts, buf, asInteger(start));
+  LOG("status is %s", decode_return_code(cxt.return_code));
+  LOG("cxt.start   is %x", cxt.start);
+  LOG("cxt.current is %x", cxt.current);
   SEXP msg = PROTECT(extract_sexp(&cxt));
   protections++;
+  LOG("status is now %s", decode_return_code(cxt.return_code));
+  LOG("cxt.start   now %x", cxt.start);
+  LOG("cxt.current now %x", cxt.current);
   
   SEXP out = list3(msg,
                    ScalarInteger(cxt.current - RAW(buf)),

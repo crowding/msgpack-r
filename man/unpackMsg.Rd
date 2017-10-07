@@ -21,24 +21,26 @@ unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
 \item{n}{How many messages to read. An "NA" here means to read as
 much as possible.}
 
-\item{parent}{If an environment is given, (such as \code{\link[=emptyenv]{emptyenv()}}),
-msgpack dicts will be unpacked into environment objects, with the
-given value as parent. Otherwise dicts will be unpacked into
-named vectors. Note that unpacking into environments precludes
-\code{use_df}.}
+\item{parent}{When an environment is given, (such as \code{\link[=emptyenv]{emptyenv()}}),
+unpack msgpack dicts into environment objects, with the given
+value as parent. This option overrides
+\code{use_df=TRUE}. Otherwise, unpack dicts into named vectors /
+lists.}
 
-\item{df}{When \code{TRUE}, msgpack dicts, whose elements are all arrays
-having the same length, are converted to \code{\link[=data.frame]{data.frame()}}s.}
+\item{df}{When \code{TRUE}, convert msgpack dicts, whose elements are
+all arrays having the same length, into \code{\link[=data.frame]{data.frame()}}s.}
 
-\item{simplify}{Whether to use primitive vectors instead of lists.}
+\item{simplify}{If \code{TRUE}, simplify msgpack lists into primitive
+vectors.}
 
 \item{max_size}{The maximum length of message to decode.}
 
 \item{max_depth}{The maximum degree of nesting to support.}
 
-\item{underflowHandler}{A \code{function(r, x)} where \code{r} is a raw object
-and \code{x < length(r)} is an offset. Its return value should be a
-new raw object, or NULL if more data could not be read.}
+\item{underflow_handler}{Advanced usage. A \code{function(r, x)} where
+\code{r} is a raw object and \code{x < length(r)} is an offset. Its
+return value should be a new raw object, beginning with the
+same object, or NULL if more data could not be read.}
 }
 \value{
 \code{unpackMsg(x)} returns one decoded message (which might be

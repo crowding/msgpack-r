@@ -112,8 +112,8 @@ test_that("read non-blocking with array breaking over chunks", {
     partial <- packMsgs(list("hello", 1:2))
     full <- packMsgs(list("hello", 1:10))
     conn <- rawConnection(full, open="r")
-    conn <- msgConnection(conn, read_size = length(test))
-    readMsgs(conn)
+    conn <- msgConnection(conn, read_size = length(partial))
+    readMsgs(conn) %is% list("hello", 1:10)
 })
 
 test_that("rawBuffer", {
@@ -141,12 +141,13 @@ test_that("read non-blocking when variously interrupted", {
                  list("hello", "world", c(1, 2, 3)))
     packed <- packMsgs(orig)
 
-    #cut <- 7
+    cut <- 7
     for (cut in 1:(length(packed) - 1)) {
-        con <- msgConnection(rawBuffer(packed[1:cut]))
-        #debug(attr(con, "reader")$readMsgs)
+        firstChunk <- packed[1:cut]
+        secondChunk <- packed[  (cut+1) : (length(packed)) ]
+        con <- msgConnection(rawBuffer(firstChunk))
         expect_error(read1 <- readMsgs(con), NA, info = paste0("at cut ", cut))
-        writeRaw(packed[  (cut+1) : (length(packed)) ], con)
+        writeRaw(secondChunk, con)
         expect_error(read2 <- readMsgs(con), NA, info = paste0("at cut ", cut))
         expect_equal(c(read1, read2), orig, info = paste0("at cut ", cut))
         close(con)

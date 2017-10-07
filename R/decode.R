@@ -121,7 +121,7 @@ unpackOpts <- function(parent = NULL,
                        max_size = NA,
                        max_depth = NA,
                        underflow_handler = NULL) {
-    #' TODO: make this actually initialize the whole msg-reader struct
+    ## TODO: make this actually initialize the whole msg-reader struct
   .Call(`_unpack_opts`,
         parent,
         df,

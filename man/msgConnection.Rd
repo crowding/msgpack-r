@@ -2,6 +2,7 @@
 % Please edit documentation in R/conn.R
 \name{msgConnection}
 \alias{msgConnection}
+\alias{close.msgConnection}
 \alias{partial}
 \alias{partial.msgConnection}
 \alias{readMsgs}
@@ -12,7 +13,9 @@
 \alias{writeMsgs}
 \title{Read and write msgpack messages using a connection.}
 \usage{
-msgConnection(conn, read_size = 2^16, max_size = NA, ...)
+msgConnection(con, read_size = 2^16, max_size = NA, ...)
+
+\method{close}{msgConnection}(con, ...)
 
 partial(conn)
 
@@ -31,8 +34,6 @@ writeMsg(obj, conn, ...)
 writeMsgs(objs, conn, ...)
 }
 \arguments{
-\item{conn}{A \link{connection} object open in binary mode.}
-
 \item{read_size}{How many bytes to read at a time.}
 
 \item{max_size}{The largest partial uncompleted message to
@@ -40,8 +41,10 @@ store. \code{NA} means do not enforce a limit.}
 
 \item{...}{Unpacking options (see \link{unpackMsg}).}
 
+\item{conn}{A \link{connection} object open in binary mode.}
+
 \item{n}{The maximum number of messages to read. A value of NA
-means to parse all available messages up until the end of input.}
+means to parse all available messages until end of input.}
 
 \item{obj}{An R object.}
 
@@ -69,8 +72,7 @@ could be caused by some messages.
 Reading from connections is somewhat experimental at the
 moment. Please report problems you encounter.
 
-\code{readMsgs(conn, n)} returns a list of some length between 0
-and n, containing the decoded messages.
+A list of up to \code{n} decoded messages.
 
 \code{status(conn)} returns the status of msgpack decoding on the
 connection. A value of \code{"ok"} indicates all requested messages

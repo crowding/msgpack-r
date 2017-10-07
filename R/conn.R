@@ -50,16 +50,17 @@ msgConnection <- function(con, read_size=2^16, max_size=NA, ...) {
                tmp <- readRaw(con, read_size)
                if (length(tmp) == 0) {
                  break()
-               } else if (!is.na(max_size)
-                          && length(partial) + length(tmp) > max_size) {
-                 status <<- "max_size exceeded"
-                 break()
                } else {
-                   partial <<- c(partial, tmp)
+                 partial <<- c(partial, tmp)
                }
              },
              "end of input" = {
-               partial <<- readRaw(con, read_size)
+                 tmp <- readRaw(con, read_size)
+                 if (length(tmp) == 0) {
+                     break()
+                 } else {
+                     partial <<- c(partial, tmp)
+                 }
              },
              #default =
              break()
