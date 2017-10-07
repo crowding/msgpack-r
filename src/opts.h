@@ -30,6 +30,7 @@ typedef struct unpack_opts {
   SEXP conn;
   unsigned long msg_start;
   SEXP read_size;
+  SEXP underflow_handler;
   
 } unpack_opts;
 

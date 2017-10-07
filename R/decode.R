@@ -64,61 +64,72 @@ unpackMsg <- function(x, ...) {
 unpackMsgs <- function(x, n=NA, ...) {
   nmsgs <- 0
   offset <- 0
-  messages <- list(NULL)
+  storeMessages <- catenator(list())
   status <- "ok"
 
   opts = unpackOpts(...)
-  if (is.na(n))
-    n <- .Machine$integer.max
+  if (is.na(n)) {
+      n <- .Machine$integer.max
+  }
   tryCatch(
-    while (nmsgs < n && status == "ok") {
-      result <- .Call(`_unpack_msg_partial`, x, offset, opts)
-      nmsgs <- nmsgs + 1
-      messages[[nmsgs]] <- result[[1]] #message
-      offset <- offset + result[[2]] #bytes read
-      status <- result[[3]] #return status
-      if (nmsgs == length(messages)) {
-        length(messages) <- 2 * length(messages)
-      }
-    }, error = function(e) {
+    while(nmsgs < n) {
+        result <- .Call(`_unpack_msg_partial`, x, offset, opts)
+        status <- result[[3]]
+        if (status == "ok") {
+            offset <- result[[2]]
+            storeMessages(list(result[[1]]))
+            nmsgs <- nmsgs + 1
+        } else {
+            break()
+        }
+    },
+    error = function(e) {
       status <<- e$message
-    })
-  length(messages) <- nmsgs
-  list(msgs = messages,
+    }
+  )
+  list(msgs = storeMessages(action="read"),
        remaining = if (offset < length(x))
                      x[(offset+1):length(x)]
                    else raw(0),
-        status = status)
+       status = status)
 }
 
 #' [unpackOpts()] interprets the options that are common to
 #' [unpackMsgs()], [unpackMsg()], and [msgConnection()]. It is not
 #' exported.
 #'
-#' @param parent If an environment is given, (such as [emptyenv()]),
-#'   msgpack dicts will be unpacked into environment objects, with the
-#'   given value as parent. Otherwise dicts will be unpacked into
-#'   named vectors. Note that unpacking into environments precludes
-#'   `use_df`.
-#' @param df When `TRUE`, msgpack dicts, whose elements are all arrays
-#'   having the same length, are converted to [data.frame()]s.
-#'
-#' [unpackOpts()] interprets the options that are common to
-#' [unpackMsgs()], [unpackMsg()], and [msgConnection()].
+#' @param parent When an environment is given, (such as [emptyenv()]),
+#'     unpack msgpack dicts into environment objects, with the given
+#'     value as parent. This option overrides
+#'     `use_df=TRUE`. Otherwise, unpack dicts into named vectors /
+#'     lists.
+#' @param df When `TRUE`, convert msgpack dicts, whose elements are
+#'     all arrays having the same length, into [data.frame()]s.
+#' @param simplify If `TRUE`, simplify msgpack lists into primitive
+#'     vectors.
+#' @param max_size The maximum length of message to decode.
+#' @param max_depth The maximum degree of nesting to support.
+#' @param underflow_handler Advanced usage. A `function(r, x)` where
+#'     `r` is a raw object and `x < length(r)` is an offset. Its
+#'     return value should be a new raw object, beginning with the
+#'     same object, or NULL if more data could not be read.
 #' @rdname unpackMsg
 #' @useDynLib msgpack _unpack_opts
 unpackOpts <- function(parent = NULL,
                        df = TRUE,
                        simplify = TRUE,
                        max_size = NA,
-                       max_depth = NA) {
+                       max_depth = NA,
+                       underflow_handler = NULL) {
+    #' TODO: make this actually initialize the whole msg-reader struct
   .Call(`_unpack_opts`,
         parent,
         df,
         simplify,
         parent.env(environment()),
         max_size,
-        max_depth);
+        max_depth,
+        underflow_handler);
 }
 
 # Come up with a name when a non-string is used as key.

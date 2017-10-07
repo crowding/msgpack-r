@@ -1,0 +1,7 @@
+Plan of action:
+    * implement a double-ended byte buffer for testing
+    * Turn unpack_partial thing back into unpack_next_or_fail().
+    * make the unpack handler fire.
+    * make both `cw_unpack_context` and `unpack_opts_struct` into
+      one external pointer object.
+      

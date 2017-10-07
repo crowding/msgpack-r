@@ -14,7 +14,7 @@ packMsg(x, ...)
 packMsgs(xs, ...)
 
 packOpts(compatible = FALSE, as_is = FALSE, use_dict = TRUE,
-  max_size = NA, buf_size = 512, package)
+  max_size = NA, buf_size = 512)
 
 prepack(x)
 

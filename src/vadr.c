@@ -2,18 +2,10 @@
 #include "cwpack.h"
 #include <R_ext/Rdynload.h>
 
-/* Assert that some object is a type. */
-void assert_type(SEXP x, SEXPTYPE type) {
+void assert_type5(SEXP x, SEXPTYPE type, const char *where, const char *file, int line) {
   if (TYPEOF(x) != type) {
-    error("Expected %s, got %s", type2char(type), type2char(TYPEOF(x)));
-  }
-}
-
-/* As above, with extra words about what thing is to be an expected type */
-void assert_type3(SEXP x, SEXPTYPE type, const char *what) {
-  if (TYPEOF(x) != type) {
-    error("Expected %s in %s, got %s",
-          type2char(type), what, type2char(TYPEOF(x)));
+    error("Expected %s in %s, got %s (%s:%d)",
+          type2char(type), where, type2char(TYPEOF(x)), file, line);
   }
 }
 

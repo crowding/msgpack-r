@@ -11,7 +11,7 @@ unpackMsg(x, ...)
 unpackMsgs(x, n = NA, ...)
 
 unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
-  max_depth = NA)
+  max_depth = NA, underflow_handler = NULL)
 }
 \arguments{
 \item{x}{A \code{\link[=raw]{raw()}} object, perhaps read from a file or socket.}
@@ -28,10 +28,17 @@ named vectors. Note that unpacking into environments precludes
 \code{use_df}.}
 
 \item{df}{When \code{TRUE}, msgpack dicts, whose elements are all arrays
-having the same length, are converted to \code{\link[=data.frame]{data.frame()}}s.
+having the same length, are converted to \code{\link[=data.frame]{data.frame()}}s.}
 
-\code{\link[=unpackOpts]{unpackOpts()}} interprets the options that are common to
-\code{\link[=unpackMsgs]{unpackMsgs()}}, \code{\link[=unpackMsg]{unpackMsg()}}, and \code{\link[=msgConnection]{msgConnection()}}.}
+\item{simplify}{Whether to use primitive vectors instead of lists.}
+
+\item{max_size}{The maximum length of message to decode.}
+
+\item{max_depth}{The maximum degree of nesting to support.}
+
+\item{underflowHandler}{A \code{function(r, x)} where \code{r} is a raw object
+and \code{x < length(r)} is an offset. Its return value should be a
+new raw object, or NULL if more data could not be read.}
 }
 \value{
 \code{unpackMsg(x)} returns one decoded message (which might be

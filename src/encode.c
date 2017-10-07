@@ -152,7 +152,6 @@ void pack_sexp(cw_pack_context* cxt, SEXP dat) {
       SEXP call = PROTECT(lang2(install("prepack"), dat));
       dat = PROTECT(eval(call, cxt->opts->package));
       unp += 2;
-      
       /* Check if the preprocessor gave us an AsIs, but don't
          preprocess again */
       cl = getAttrib(dat, R_ClassSymbol);

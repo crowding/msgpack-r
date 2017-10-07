@@ -84,7 +84,14 @@ test_that("write to and read from connections", {
   }) %is% as.list(1:10)
 })
 
-test_that("read non-blocking with inomplete message", {
+test_that("read non-blocking with complete message", {
+    test <- packMsgs("hello", "and",)
+    conn <- rawConnection(packMsgs(list("hello", "and", "world")), open="r")
+    conn <- msgConnection(conn, read_size = length(test))
+    readMsgs(conn) %is% list("hello", "and", "world")
+})
+
+test_that("read non-blocking with incomplete message", {
   two_ends(function(endA, endB) {
     writeMsg(1, endA)
     partial <- packMsgs(list("here is a partial message", 2))
@@ -100,8 +107,54 @@ test_that("read non-blocking with inomplete message", {
   })
 })
 
+test_that("read non-blocking with array breaking over chunks", {
+    #this should at least trigger the underflow handler, no?
+    partial <- packMsgs(list("hello", 1:2))
+    full <- packMsgs(list("hello", 1:10))
+    conn <- rawConnection(full, open="r")
+    conn <- msgConnection(conn, read_size = length(test))
+    readMsgs(conn)
+})
+
+test_that("rawBuffer", {
+    x <- rawBuffer(as.raw(1:5))
+    tryCatch({
+        readRaw(x, 3) %is% as.raw(1:3)
+        writeRaw(as.raw(6:10), x)
+        readRaw(x, 5) %is% as.raw(4:8)
+        readRaw(x, 10) %is% as.raw(9:10)
+        readRaw(x, 10) %is% raw(0)
+        writeRaw(as.raw(11:25), x)
+        readRaw(x, 100) %is% as.raw(11:25)
+        writeRaw(as.raw(26:27), x)
+        readRaw(x, 2) %is% as.raw(26:27)
+        readRaw(x, 0) %is% raw(0)
+        readRaw(x, 10) %is% raw(0)
+    }, finally = {
+        close(x)
+    })
+})
+
+test_that("read non-blocking when variously interrupted", {
+    orig <- list("hello",
+                 c("hello", "world"),
+                 list("hello", "world", c(1, 2, 3)))
+    packed <- packMsgs(orig)
+
+    #cut <- 7
+    for (cut in 1:(length(packed) - 1)) {
+        con <- msgConnection(rawBuffer(packed[1:cut]))
+        #debug(attr(con, "reader")$readMsgs)
+        expect_error(read1 <- readMsgs(con), NA, info = paste0("at cut ", cut))
+        writeRaw(packed[  (cut+1) : (length(packed)) ], con)
+        expect_error(read2 <- readMsgs(con), NA, info = paste0("at cut ", cut))
+        expect_equal(c(read1, read2), orig, info = paste0("at cut ", cut))
+        close(con)
+    }
+})
+
 # I'd like to have some tests with reading/writing to a separate
-# process. I fried with parallel/mcfork, makeForkCluster, but forking
+# process. I tried with parallel/mcfork, makeForkCluster, but forking
 # seems to cause weirdness with nonblocking. Subprocess package seems
-# to not have tha prob. but the subprocess doesn't have my functions
-# loaded.
+# to not have that prob. but the subprocess that is created doesn't
+# have my functions loaded.

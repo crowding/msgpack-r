@@ -56,13 +56,11 @@ packMsgs <- function(xs, ...) {
 #'   change this.
 #' @rdname packMsg
 #' @useDynLib msgpack _pack_opts
-packOpts = function(compatible = FALSE,
-#' @useDynLib msgpack _pack_opts
+packOpts <- function(compatible = FALSE,
                     as_is = FALSE,
                     use_dict = TRUE,
                     max_size = NA,
-                    buf_size = 512,
-                     package) {
+                    buf_size = 512) {
   .Call(`_pack_opts`,
         compatible,
         as_is,

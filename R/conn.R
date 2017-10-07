@@ -33,7 +33,7 @@
 #' readMsg(inn)
 #' readMsgs(inn, 3)
 #' @export
-msgConnection <- function(conn, read_size=2^16, max_size=NA, ...) {
+msgConnection <- function(con, read_size=2^16, max_size=NA, ...) {
   partial = raw(0)
   status = "ok"
 
@@ -44,24 +44,24 @@ msgConnection <- function(conn, read_size=2^16, max_size=NA, ...) {
       switch(status,
              "ok" = {
                if (length(partial) == 0)
-                 partial <<- readRaw(conn, read_size)
+                   partial <<- readRaw(con, read_size)
              },
              "buffer underflow" = {
-               tmp <- readRaw(conn, read_size)
+               tmp <- readRaw(con, read_size)
                if (length(tmp) == 0) {
                  break()
                } else if (!is.na(max_size)
                           && length(partial) + length(tmp) > max_size) {
-                 status <<- "buffer overflow"
+                 status <<- "max_size exceeded"
                  break()
                } else {
-                 partial <<- c(partial, tmp)
+                   partial <<- c(partial, tmp)
                }
              },
              "end of input" = {
-               buf <- readRaw(conn, read_size)
+               partial <<- readRaw(con, read_size)
              },
-             #default
+             #default =
              break()
              )
       if (length(partial) > 0) {
@@ -76,19 +76,19 @@ msgConnection <- function(conn, read_size=2^16, max_size=NA, ...) {
     collect(action="read")
   }
 
+  doClose <- function(...) {
+      close(con, ...)
+  }
+
   #msgConnection object is just the orig object with this
-  #environment dangled off it
-  attr(conn, "reader") <- environment();
-  addClass(conn, "msgConnection")
+  #environment dangled off it.
+  structure(addClass(con, "msgConnection"), reader = environment())
 }
 
-# I get errors thrown (sometimes) when reading at the end of
-# a nonblocking fifo.
-readRaw <- function(conn, n) {
-  tryCatch(readBin(conn, 'raw', n),
-           error=function(e) {
-             raw(0)
-             })
+#' @rdname msgConnection
+#' @export
+close.msgConnection <- function(con, ...) {
+    attr(con, "reader")$doClose(...)
 }
 
 catenator <- function(val=c()) {
@@ -103,7 +103,7 @@ catenator <- function(val=c()) {
                  if (lx + n > l) {
                    length(val) <<- max(l + lx, 2 * l);
                  }
-                 val[(n+1):(n+lx)] <<- x
+                 val[ (n + 1):(n + lx) ] <<- x
                  n <<- n + lx
                }
              },
@@ -134,9 +134,8 @@ partial.msgConnection <- function(conn) {
 #' @rdname msgConnection
 #' @export
 #' @param n The maximum number of messages to read. A value of NA
-#'   means to parse all available messages up until the end of input.
-#' @return `readMsgs(conn, n)` returns a list of some length between 0
-#'   and n, containing the decoded messages.
+#'     means to parse all available messages until end of input.
+#' @return A list of up to `n` decoded messages.
 readMsgs <- function(conn, n = NA, ...) {
   UseMethod("readMsgs")
 }
@@ -177,7 +176,7 @@ readMsg <- function(conn, ...) {
 #' @export
 #' @param obj An R object.
 writeMsg <- function(obj, conn, ...) {
-  writeBin(packMsg(obj, ...), conn)
+  writeRaw(packMsg(obj, ...), conn)
 }
 
 #' ...
@@ -190,5 +189,96 @@ writeMsg <- function(obj, conn, ...) {
 #' @export
 #' @param objs A list of R objects.
 writeMsgs <- function(objs, conn, ...) {
-  writeBin(packMsgs(objs), conn)
+  writeRaw(packMsgs(objs), conn)
+}
+
+
+## To support test harness we use "readRaw" and "writeRaw"
+## internally instead of "readBin" which is not S3
+
+readRaw <- function(con, n, ...) {
+    UseMethod("readRaw")
+}
+
+
+writeRaw <- function(object, con, ...) {
+    UseMethod("writeRaw", con)
+}
+
+
+# I get errors thrown (sometimes) when reading at the end of
+# a nonblocking fifo.
+readRaw.connection <- function(conn, n) {
+    tryCatch(readBin(conn, 'raw', n),
+             error=function(e) {
+                 #warning("Ignoring ", e)
+                 raw(0)
+             })
+}
+
+
+writeRaw.connection <- function(object, con, ...) {
+    writeBin(object, con, ...)
+}
+
+
+## this is a double ended byte buffer for test harness purposes
+rawBuffer <- function(object = raw(0)) {
+    open <- "r"
+    bytes <- length(object)
+    buf <- rawConnection(object, open = "r")
+    object <- NULL
+
+    write <- function(object) {
+        switch(open,
+               "w" = {
+                   writeBin(object, buf)
+               },
+               "r" = {
+                   data <- readBin(buf, 'raw', bytes - seek(buf))
+                   close(buf)
+                   buf <<- rawConnection(data,
+                                         open = "w")
+                   open <<- "w"
+                   writeBin(data, buf)
+                   write(object)
+               }
+               )
+    }
+
+    read <- function(n) {
+        switch(open,
+               "r" = {
+                   readBin(buf, 'raw', n)
+               },
+               "w" = {
+                   ##convert a write buffer into a read buffer
+                   val <<- rawConnectionValue(buf)
+                   close(buf)
+                   buf <<- rawConnection(val, open = "r")
+                   bytes <<- length(val)
+                   open <<- "r"
+                   read(n)
+               }
+               )
+    }
+
+    doClose <- function(n) {
+        close(buf)
+        buf <- NULL
+    }
+
+    structure(list(environment()), class = "rawBuffer")
+}
+
+writeRaw.rawBuffer <- function(object, con) {
+    con[[1]]$write(object)
+}
+
+readRaw.rawBuffer <- function(con, n) {
+    con[[1]]$read(n)
+}
+
+close.rawBuffer <- function(con) {
+    con[[1]]$doClose()
 }

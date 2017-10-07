@@ -14,6 +14,7 @@
 #endif
 
 SEXP extract_sexp(cw_unpack_context *);
+int underflow_handler(cw_unpack_context *, unsigned long);
 void cw_unpack_next_or_fail(cw_unpack_context *);
 SEXP make_sexp_from_context(cw_unpack_context *);
 
@@ -50,20 +51,29 @@ SEXP _unpack_opts(SEXP dict,
                   SEXP simplify,
                   SEXP package,
                   SEXP max_size,
-                  SEXP max_depth) {
+                  SEXP max_depth,
+                  SEXP underflow_handler) {
   SEXP optsxp = PROTECT(allocVector(RAWSXP, sizeof(unpack_opts)));
   unpack_opts *opts = (unpack_opts*)(RAW(optsxp));
   opts->use_df = asLogical(use_df);
   opts->dict = dict;
   opts->simplify = asLogical(simplify);
   opts->package = package;
+  opts->underflow_handler = underflow_handler;
 
   if (isNA(max_size)) opts->max_pending = ULONG_MAX;
   else opts->max_pending = asReal(max_size);
   if (isNA(max_depth)) opts->max_depth = UINT_MAX;
   else opts->max_depth = asInteger(max_depth);
 
-  setAttrib(optsxp, install("refs"), CONS(dict, CONS(package, R_NilValue)));
+  /* To make sure that R does not rinalize the objects pointed to by
+     this struct, hang the object references off of it.
+     
+     TODO: return an external pointer instead of the RAWSXP. */
+  setAttrib(optsxp, install("refs"), CONS(dict,
+                                          CONS(package,
+                                               CONS(underflow_handler,
+                                                    R_NilValue))));
   UNPROTECT(1);
   return optsxp;
 }
@@ -100,21 +110,28 @@ SEXP _unpack_msg(SEXP dat, SEXP opts) {
   return out;
 }
 
+int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
+  /* bounce back to R to read another buffer */
+  if (cxt->opts->underflow_handler == R_NilValue)
+    error("No underflow handler provided\n");
+  assert_type3(cxt->opts->underflow_handler, CLOSXP, "Underflow handler was not a closure");
+  error("Actually I don't know how to handle underflow");
+  return 1;
+};
+
 SEXP _unpack_msg_partial(SEXP buf, SEXP start, SEXP opts) {
   calls++;
   cw_unpack_context cxt;
   int protections = init_unpack_context(&cxt, opts, buf, asInteger(start));
-
-  SEXP dat = PROTECT(extract_sexp(&cxt));
+  SEXP msg = PROTECT(extract_sexp(&cxt));
   protections++;
-
-  SEXP out = list3(dat,
-                   PROTECT(ScalarInteger(cxt.current - cxt.start)),
-                   PROTECT(ScalarString(mkChar(decode_return_code(cxt.return_code)))));
-  protections += 2;
+  
+  SEXP out = list3(msg,
+                   ScalarInteger(cxt.current - RAW(buf)),
+                   ScalarString(mkChar(decode_return_code(cxt.return_code))));
   
   ASSERT(cxt.opts->depth == 0);
-  ASSERT(cxt.opts->pending == 0);  
+  ASSERT(cxt.opts->pending == 0);
   UNPROTECT(protections);
   return out;
 }
