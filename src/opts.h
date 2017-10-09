@@ -24,20 +24,14 @@ typedef struct unpack_opts {
   SEXP buf;
   PROTECT_INDEX buf_index;
   unsigned int depth;
+  unsigned long bytes_discarded;
   unsigned long pending;
-
-  /* State variables used in read */
-  SEXP conn;
-  unsigned long msg_start;
-  SEXP read_size;
   SEXP underflow_handler;
   
 } unpack_opts;
 
-#include <Rinternals.h>
 
 typedef struct pack_opts {
-
   int as_is;
   int compatible;
   int use_dict;

@@ -14,7 +14,7 @@
 #endif
 
 SEXP extract_sexp(cw_unpack_context *);
-int underflow_handler(cw_unpack_context *, unsigned long);
+int handle_unpack_underflow(cw_unpack_context *, unsigned long);
 void cw_unpack_next_or_fail(cw_unpack_context *);
 SEXP make_sexp_from_context(cw_unpack_context *);
 
@@ -52,24 +52,29 @@ SEXP _unpack_opts(SEXP dict,
                   SEXP package,
                   SEXP max_size,
                   SEXP max_depth,
-                  SEXP underflow_handler) {
+                  SEXP underflow_handler,
+                  SEXP buf) {
   SEXP optsxp = PROTECT(allocVector(RAWSXP, sizeof(unpack_opts)));
   unpack_opts *opts = (unpack_opts*)(RAW(optsxp));
   opts->use_df = asLogical(use_df);
   opts->dict = dict;
   opts->simplify = asLogical(simplify);
   opts->package = package;
-  opts->underflow_handler = underflow_handler;
 
+  opts->underflow_handler = underflow_handler;
+  opts->buf = buf; /* FIXME: but who holds this reference? Can't use
+                      protect_with_index if I'm returning
+                      to R. */
+  opts->bytes_discarded = 0;
   if (isNA(max_size)) opts->max_pending = ULONG_MAX;
   else opts->max_pending = asReal(max_size);
   if (isNA(max_depth)) opts->max_depth = UINT_MAX;
   else opts->max_depth = asInteger(max_depth);
 
-  /* To make sure that R does not rinalize the objects pointed to by
+  /* To make sure that R does not finalize the objects pointed to by
      this struct, hang the object references off of it.
      
-     TODO: return an external pointer instead of the RAWSXP. */
+     TODO: change this to be the R External Pointer mechanism instead? */
   setAttrib(optsxp, install("refs"), CONS(dict,
                                           CONS(package,
                                                CONS(underflow_handler,
@@ -81,26 +86,39 @@ SEXP _unpack_opts(SEXP dict,
 
 int init_unpack_context(cw_unpack_context *cxt,
                         SEXP optsxp,
-                        SEXP dat,
                         unsigned long start) {
-  assert_type(dat, RAWSXP);
   assert_type(optsxp, RAWSXP);
   ASSERT(LENGTH(optsxp) == sizeof(unpack_opts));
-  ASSERT(start <= LENGTH(dat))
-  cw_unpack_context_init(cxt, RAW(dat) + start, LENGTH(dat) - start, 0);
-  cxt->opts = (unpack_opts *)RAW(optsxp);
 
-  cxt->opts->depth = 0;
-  cxt->opts->pending = 0;
+  unpack_opts *opts = (unpack_opts *)RAW(optsxp);
+  opts->depth = 0;
+  opts->pending = 0;
+  opts->bytes_discarded = 0;
+
+  SEXP buf = opts->buf;
+  assert_type(buf, RAWSXP);
+  ASSERT(start <= LENGTH(buf));
+  
+  if (cw_unpack_context_init(cxt, RAW(buf) + start, LENGTH(buf) - start, NULL))
+    error("Could not initiaize cw_unpack");
+  cxt->opts = opts;
+  
+  if (opts->underflow_handler != R_NilValue) {
+    Rprintf("Initializing unpack with underflow handler\n");
+    cxt->handle_unpack_underflow = &handle_unpack_underflow;
+  } else {
+    Rprintf("Initializing unpack with NO underflow handler\n");
+    cxt->handle_unpack_underflow = NULL;
+  }
   return 0;
 }
 
 
-SEXP _unpack_msg(SEXP dat, SEXP opts) {
+
+SEXP _unpack_msg(SEXP opts) {
   calls++;
-  assert_type(dat, RAWSXP);
   cw_unpack_context cxt;
-  int protections = init_unpack_context(&cxt, opts, dat, 0);
+  int protections = init_unpack_context(&cxt, opts, 0);
   LOG("depth = %u, pending = %lu", cxt.opts->depth, cxt.opts->pending); 
   SEXP out = extract_sexp(&cxt);
   LOG("depth = %u, pending = %lu", cxt.opts->depth, cxt.opts->pending); 
@@ -110,33 +128,54 @@ SEXP _unpack_msg(SEXP dat, SEXP opts) {
   return out;
 }
 
+
 int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
   /* bounce back to R to read another buffer */
-  if (cxt->opts->underflow_handler == R_NilValue)
-    error("No underflow handler provided\n");
-  assert_type3(cxt->opts->underflow_handler, CLOSXP, "Underflow handler was not a closure");
-  error("Actually I don't know how to handle underflow");
-  return 1;
-};
+  Rprintf("C underflow handler called!\n");
+  if (cxt->opts->underflow_handler != R_NilValue) {
+    assert_type(cxt->opts->underflow_handler, CLOSXP);
+    // actually we don't know how to.
+    Rprintf("handling underflow (TODO)!\n");
+    return CWP_RC_END_OF_INPUT;
+  } else {
+    Rprintf("R underflow handler is null!\n");
+    // How to let parent know about new buffer?
+    /* monitor cxt->opts->bytes_discarded, cxt->opts->buf here? */
+    return CWP_RC_END_OF_INPUT;
+  }
+}
 
-SEXP _unpack_msg_partial(SEXP buf, SEXP start, SEXP opts) {
+
+SEXP _unpack_msg_partial(SEXP start, SEXP opts) {
+  /* Note that this must be able to cope with underflow handlers. */
+
+  /* count calls to see that callbacks are functioning... */
   calls++;
+
   cw_unpack_context cxt;
-  LOG("buf is %x", RAW(buf));
   LOG("start is %x", asInteger(start));
-  int protections = init_unpack_context(&cxt, opts, buf, asInteger(start));
+  int protections = init_unpack_context(&cxt, opts, asInteger(start));
+  SEXP buf = cxt.opts->buf;
+  LOG("buf is %x", RAW(buf));
   LOG("status is %s", decode_return_code(cxt.return_code));
   LOG("cxt.start   is %x", cxt.start);
   LOG("cxt.current is %x", cxt.current);
   SEXP msg = PROTECT(extract_sexp(&cxt));
   protections++;
+  LOG("buf is now %x", RAW(cxt->opts.buf));
   LOG("status is now %s", decode_return_code(cxt.return_code));
   LOG("cxt.start   now %x", cxt.start);
   LOG("cxt.current now %x", cxt.current);
   
-  SEXP out = list3(msg,
-                   ScalarInteger(cxt.current - RAW(buf)),
-                   ScalarString(mkChar(decode_return_code(cxt.return_code))));
+  /* return a five item list: the message, the new offset (relative to
+     the possibly changed buffer), the status, the number of bytes
+     consumed, and the (possibly changed) buffer. */
+  SEXP out = list5(
+    msg,
+    ScalarInteger(cxt.current - RAW(cxt.opts->buf)),
+    ScalarString(mkChar(decode_return_code(cxt.return_code))),
+    ScalarInteger(cxt.current - cxt.start + cxt.opts->bytes_discarded),
+    cxt.opts->buf);
   
   ASSERT(cxt.opts->depth == 0);
   ASSERT(cxt.opts->pending == 0);
@@ -481,9 +520,9 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
       error("Don't know how to fill out a %s (this shouldn't happen)",
             type2char(TYPEOF(buf)));
 
-    } /* end switch(TYPEOF(buf)) */
+    } /* switch(TYPEOF(buf)) */
 
-  } /* end for(i = ... */
+  } /* for(i = ... */
 
   if (names != R_NilValue) {
     setAttrib(buf, R_NamesSymbol, names);
@@ -501,7 +540,7 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
   LOGD("Returning a %s", type2char(TYPEOF(buf)));
   cxt->opts->depth--;
   return buf;
-}
+} /* SEXP fill_vector(... */
 
 
 SEXP coerce(SEXP buf, SEXPTYPE type) {

@@ -24,7 +24,7 @@
 #' could be caused by some messages.
 #'
 #' Reading from connections is somewhat experimental at the
-#' moment. Please report problems you encounter.
+#' moment. Please report any problems you encounter.
 #' @examples
 #' out <- rawConnection(raw(0), open="wb")
 #' apply(quakes, 1, function(x) writeMsg(x, out))
@@ -78,13 +78,17 @@ msgConnection <- function(con, read_size=2^16, max_size=NA, ...) {
   }
 
   doClose <- function(...) {
-      close(con, ...)
+    close(con, ...)
   }
 
   #msgConnection object is just the orig object with this
   #environment dangled off it.
   structure(addClass(con, "msgConnection"), reader = environment())
 }
+
+
+# TODO: connection print and summary methods
+
 
 #' @rdname msgConnection
 #' @export
@@ -93,7 +97,7 @@ close.msgConnection <- function(con, ...) {
 }
 
 catenator <- function(val=c()) {
-  n <- length(val)
+    n <- length(val)
   function(x=c(), action="store") {
     switch(action,
            store =
@@ -116,6 +120,13 @@ catenator <- function(val=c()) {
            length =
              {
                n
+             },
+           reset =
+             {
+               length(val) <<- n
+               tmp <- val
+               val <<- x
+               tmp
              })
   }
 }

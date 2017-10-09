@@ -36,7 +36,7 @@
 #' unpackMsg(msg)
 #' @export
 unpackMsg <- function(x, ...) {
-  .Call(`_unpack_msg`, x, unpackOpts(...))
+  .Call(`_unpack_msg`, unpackOpts(..., buf=x))
 }
 
 #' Extract a number of msgpack messages from a raw object.
@@ -44,16 +44,12 @@ unpackMsg <- function(x, ...) {
 #' @param n How many messages to read. An "NA" here means to read as
 #'   much as possible.
 #' @return `unpackMsgs(r, n)` returns a list `X` with three elements:
-#'   `X$msgs` is a list of the messages unpacked. `X$remaining` is a
-#'   [raw] vector of data that was not unpacked. `x$status` is a
-#'   character value indicating why parsing stopped.
-#'
-#' Some status values you may want to check for are `"ok"` meaning
-#' that the requested number of messages was read; `"end of input"`
-#' meaning a smaller number of messages was read; and
-#' `"buffer underflow"` meaning that we were in the middle of a
-#' message when the end of input was reached. Other status values
-#' indicate errors encountered in parsing.
+#'   * `X$msgs` is a list of the messages unpacked.
+#'   * `X$remaining` is data remaining to be parsed.
+#'   * `X$status` is a status message, typically "ok", "end of input",
+#'     or "buffer underflow".
+#'   * `X$bytes` is the number of bytes read at the end of the last
+#'     successfully read message.
 #'
 #' @examples
 #' x <- packMsgs(list("one", "two", "three"))
@@ -62,31 +58,55 @@ unpackMsg <- function(x, ...) {
 #' @rdname unpackMsg
 #' @export
 unpackMsgs <- function(x, n=NA, ...) {
+  if (is.na(n)) {
+    n <- .Machine$integer.max
+  }
+
   nmsgs <- 0
   offset <- 0
   storeMessages <- catenator(list())
+  backlog <- catenator(raw(0))
   status <- "ok"
 
-  opts = unpackOpts(...)
-  if (is.na(n)) {
-      n <- .Machine$integer.max
-  }
+  underflow <- function(r, n) {
+    if (n > 0) {
+      backlog(x[1:n])
+    }
+    if (n < length(x)) {
+      c(x[(n+1):length(x)], getMore())
+    } else {
+      getMore()
+    }
+  }; debug(underflow)
+
+  ## need to keep a backlog up to the beginning of last decoded
+  ## message, at least.
+  opts = unpackOpts(..., buf = x)
   tryCatch(
-    while(nmsgs < n) {
-        result <- .Call(`_unpack_msg_partial`, x, offset, opts)
-        status <- result[[3]]
-        if (status == "ok") {
-            offset <- result[[2]]
-            storeMessages(list(result[[1]]))
-            nmsgs <- nmsgs + 1
-        } else {
-            break()
-        }
+    while(storeMessages(action="length") < n) {
+      # this should be able to continuously parse and read and parse
+      # and read? Or that happens at a higher level?
+      result <- .Call(`_unpack_msg_partial`, offset, opts)
+      status <- result[[3]]
+      if (status == "ok") {
+        # we get here at the end of a successfully parsed message
+        storeMessages(list(result[[1]]))
+
+        # unpack_msg_partial should return the offset
+        # in the original message.
+        offset <- result[[2]]
+        x <- result[[5]]
+      } else {
+        stop(status)
+      }
     },
     error = function(e) {
       status <<- e$message
+      # rewind to last successfully parsed message, somehow???
+      # ?????
     }
   )
+
   list(msgs = storeMessages(action="read"),
        remaining = if (offset < length(x))
                      x[(offset+1):length(x)]
@@ -109,19 +129,23 @@ unpackMsgs <- function(x, n=NA, ...) {
 #'     vectors.
 #' @param max_size The maximum length of message to decode.
 #' @param max_depth The maximum degree of nesting to support.
-#' @param underflow_handler Advanced usage. A `function(r, x)` where
-#'     `r` is a raw object and `x < length(r)` is an offset. Its
-#'     return value should be a new raw object, beginning with the
-#'     same object, or NULL if more data could not be read.
+#' @param underflow_handler Advanced usage, see below.
 #' @rdname unpackMsg
 #' @useDynLib msgpack _unpack_opts
+#'
+#' `underflow_handler` is for implementing reading from files or
+#' connections. It takes a `function(r, x)` where `r` is a raw object,
+#' `x < length(r)` is a 0-indexed offset within `r`, and `n` is a
+#' size. It should return a new raw object, whose data starts at the
+#' offset (i.e. including the leftover tail of r), and contains up to
+#' `n` bytes of new data.
 unpackOpts <- function(parent = NULL,
                        df = TRUE,
                        simplify = TRUE,
                        max_size = NA,
                        max_depth = NA,
-                       underflow_handler = NULL) {
-    ## TODO: make this actually initialize the whole msg-reader struct
+                       underflow_handler = NULL,
+                       buf = raw(0)) {
   .Call(`_unpack_opts`,
         parent,
         df,
@@ -129,7 +153,8 @@ unpackOpts <- function(parent = NULL,
         parent.env(environment()),
         max_size,
         max_depth,
-        underflow_handler);
+        underflow_handler,
+        buf);
 }
 
 # Come up with a name when a non-string is used as key.
