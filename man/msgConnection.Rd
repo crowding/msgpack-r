@@ -8,6 +8,7 @@
 \alias{readMsgs}
 \alias{status}
 \alias{status.msgConnection}
+\alias{seek.msgConnection}
 \alias{readMsg}
 \alias{writeMsg}
 \alias{writeMsgs}
@@ -25,13 +26,16 @@ readMsgs(conn, n = NA, ...)
 
 status(conn)
 
-\method{status}{msgConnection}(conn)
+\method{status}{msgConnection}(conn, rw = "")
 
-readMsg(conn, ...)
+\method{seek}{msgConnection}(con, where = NA, origin = "start",
+  rw = summary(con)$mode)
 
-writeMsg(obj, conn, ...)
+readMsg(con, ...)
 
-writeMsgs(objs, conn, ...)
+writeMsg(obj, con, ...)
+
+writeMsgs(objs, con, ...)
 }
 \arguments{
 \item{read_size}{How many bytes to read at a time.}
@@ -46,8 +50,6 @@ store. \code{NA} means do not enforce a limit.}
 \item{n}{The maximum number of messages to read. A value of NA
 means to parse all available messages until end of input.}
 
-\item{obj}{An R object.}
-
 \item{objs}{A list of R objects.}
 }
 \value{
@@ -59,18 +61,11 @@ Therefore when reading over a socket or a fifo it is best to use a
 nonblocking connection, and it will not work to mix readMsg and
 readBin on the same connection.
 
-In the present implementation, decoding must start over at the
-beginning of the message when it is split across two or more
-chunks. So \code{read_size} should be set to something larger than the
-typical message recieved.
-
-If you are reading data from an untrusted source you will probably want
-to set option \code{max_size} (see \link{unpackOpts}).  This
-protects against stack overflows and out-of-memory errors that
-could be caused by some messages.
-
-Reading from connections is somewhat experimental at the
-moment. Please report problems you encounter.
+If you are reading data from a not completely trusted source you
+will probably want to give options \code{max_size} and \code{max_depth} (see
+\link{unpackOpts}). Without it, some deeply nested or cleverly designed
+messages can cause a stack overflow or out-of-memory error.  With
+these options set, you will get an R exception instead.
 
 A list of up to \code{n} decoded messages.
 
@@ -85,6 +80,15 @@ which will effectively halt reading.
 }
 \description{
 Read and write msgpack messages using a connection.
+
+...
+
+\code{seek(con)} returns the number of bytes that have been successfully
+read or written.
+
+...
+
+...
 
 \code{writeMsgs(l, conn)} writes a list of
 messages to a connection. That is, \code{writeMsg(1:10, conn)} writes one

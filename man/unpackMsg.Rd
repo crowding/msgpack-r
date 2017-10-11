@@ -8,10 +8,10 @@
 \usage{
 unpackMsg(x, ...)
 
-unpackMsgs(x, n = NA, ...)
+unpackMsgs(x, n = NA, reader = NULL, ...)
 
 unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
-  max_depth = NA, underflow_handler = NULL)
+  max_depth = NA, underflow_handler = NULL, buf = raw(0))
 }
 \arguments{
 \item{x}{A \code{\link[=raw]{raw()}} object, perhaps read from a file or socket.}
@@ -23,9 +23,8 @@ much as possible.}
 
 \item{parent}{When an environment is given, (such as \code{\link[=emptyenv]{emptyenv()}}),
 unpack msgpack dicts into environment objects, with the given
-value as parent. This option overrides
-\code{use_df=TRUE}. Otherwise, unpack dicts into named vectors /
-lists.}
+value as parent. This option overrides \code{use_df=TRUE}. Otherwise,
+unpack dicts into named vectors / lists.}
 
 \item{df}{When \code{TRUE}, convert msgpack dicts, whose elements are
 all arrays having the same length, into \code{\link[=data.frame]{data.frame()}}s.}
@@ -36,11 +35,6 @@ vectors.}
 \item{max_size}{The maximum length of message to decode.}
 
 \item{max_depth}{The maximum degree of nesting to support.}
-
-\item{underflow_handler}{Advanced usage. A \code{function(r, x)} where
-\code{r} is a raw object and \code{x < length(r)} is an offset. Its
-return value should be a new raw object, beginning with the
-same object, or NULL if more data could not be read.}
 }
 \value{
 \code{unpackMsg(x)} returns one decoded message (which might be
@@ -71,16 +65,13 @@ Extension types will be decoded as raw objects with a class like
 \code{"ext120"} and a warning.
 
 \code{unpackMsgs(r, n)} returns a list \code{X} with three elements:
-\code{X$msgs} is a list of the messages unpacked. \code{X$remaining} is a
-\link{raw} vector of data that was not unpacked. \code{x$status} is a
-character value indicating why parsing stopped.
-
-Some status values you may want to check for are \code{"ok"} meaning
-that the requested number of messages was read; \code{"end of input"}
-meaning a smaller number of messages was read; and
-\code{"buffer underflow"} meaning that we were in the middle of a
-message when the end of input was reached. Other status values
-indicate errors encountered in parsing.
+\itemize{
+\item \code{X$msgs} is a list of the messages unpacked.
+\item \code{X$remaining} is data remaining to be parsed.
+\item \code{X$status} is a status message, typically "ok", "end of input",
+or "buffer underflow".
+\item \code{x$bytes_read} the number of bytes consumed.
+}
 }
 \description{
 Unpack raw objects in msgpack format into R data structures.

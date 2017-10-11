@@ -65,7 +65,6 @@ SEXP _unpack_opts(SEXP dict,
   opts->buf = buf; /* FIXME: but who holds this reference? Can't use
                       protect_with_index if I'm returning
                       to R. */
-  opts->bytes_discarded = 0;
   if (isNA(max_size)) opts->max_pending = ULONG_MAX;
   else opts->max_pending = asReal(max_size);
   if (isNA(max_depth)) opts->max_depth = UINT_MAX;
@@ -93,7 +92,6 @@ int init_unpack_context(cw_unpack_context *cxt,
   unpack_opts *opts = (unpack_opts *)RAW(optsxp);
   opts->depth = 0;
   opts->pending = 0;
-  opts->bytes_discarded = 0;
 
   SEXP buf = opts->buf;
   assert_type(buf, RAWSXP);
@@ -104,10 +102,8 @@ int init_unpack_context(cw_unpack_context *cxt,
   cxt->opts = opts;
   
   if (opts->underflow_handler != R_NilValue) {
-    Rprintf("Initializing unpack with underflow handler\n");
     cxt->handle_unpack_underflow = &handle_unpack_underflow;
   } else {
-    Rprintf("Initializing unpack with NO underflow handler\n");
     cxt->handle_unpack_underflow = NULL;
   }
   return 0;
@@ -130,55 +126,71 @@ SEXP _unpack_msg(SEXP opts) {
 
 
 int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
-  /* bounce back to R to read another buffer */
-  Rprintf("C underflow handler called!\n");
+  /* bounce back to R to read X bytesanother buffer */
   if (cxt->opts->underflow_handler != R_NilValue) {
     assert_type(cxt->opts->underflow_handler, CLOSXP);
-    // actually we don't know how to.
-    Rprintf("handling underflow (TODO)!\n");
-    return CWP_RC_END_OF_INPUT;
+    LOG("Calling underflow handler");
+    SEXP call = PROTECT(lang3(cxt->opts->underflow_handler,
+                              cxt->opts->buf,
+                              ScalarInteger(cxt->current - RAW(cxt->opts->buf))));
+    SEXP buf = PROTECT(eval(call, cxt->opts->package));
+    if (TYPEOF(buf) == RAWSXP
+        && buf != cxt->opts->buf
+        && LENGTH(buf) > (cxt->end - cxt->current)) {
+      LOG("Swapping buffers");
+      cxt->current = RAW(buf);
+      cxt->start = RAW(buf);
+      cxt->end = RAW(buf) + LENGTH(buf);
+      cxt->opts->buf = buf;
+      UNPROTECT(2);
+      return CWP_RC_OK;
+    } else {
+      LOG("No new data read");
+      return CWP_RC_END_OF_INPUT;
+    }
   } else {
-    Rprintf("R underflow handler is null!\n");
-    // How to let parent know about new buffer?
-    /* monitor cxt->opts->bytes_discarded, cxt->opts->buf here? */
+    LOG("No underflow handler");
     return CWP_RC_END_OF_INPUT;
   }
 }
 
-
-SEXP _unpack_msg_partial(SEXP start, SEXP opts) {
+SEXP _unpack_msg_partial(SEXP start, SEXP optsxp) {
   /* Note that this must be able to cope with underflow handlers. */
 
   /* count calls to see that callbacks are functioning... */
   calls++;
 
   cw_unpack_context cxt;
-  LOG("start is %x", asInteger(start));
-  int protections = init_unpack_context(&cxt, opts, asInteger(start));
-  SEXP buf = cxt.opts->buf;
-  LOG("buf is %x", RAW(buf));
-  LOG("status is %s", decode_return_code(cxt.return_code));
-  LOG("cxt.start   is %x", cxt.start);
-  LOG("cxt.current is %x", cxt.current);
+  assert_type(optsxp, RAWSXP);
+  
+  unpack_opts *opts = (unpack_opts *)RAW(optsxp);
+  LOG("Before: buf         = %x", RAW(opts->buf));
+  LOG("        start       = %x", asInteger(start));
+
+  int protections = init_unpack_context(&cxt, optsxp, asInteger(start));
+  LOG("        status      = %s", decode_return_code(cxt.return_code));
+  LOG("        cxt.start   = %x", cxt.start);
+  LOG("        cxt.current = %x", cxt.current);
+
   SEXP msg = PROTECT(extract_sexp(&cxt));
   protections++;
-  LOG("buf is now %x", RAW(cxt->opts.buf));
-  LOG("status is now %s", decode_return_code(cxt.return_code));
-  LOG("cxt.start   now %x", cxt.start);
-  LOG("cxt.current now %x", cxt.current);
+  LOG("After,  buf         = %x", RAW(cxt.opts->buf));
+  LOG("        status      = %s", decode_return_code(cxt.return_code));
+  LOG("        cxt.start   = %x", cxt.start);
+  LOG("        cxt.current = %x", cxt.current);
   
   /* return a five item list: the message, the new offset (relative to
      the possibly changed buffer), the status, the number of bytes
      consumed, and the (possibly changed) buffer. */
-  SEXP out = list5(
+  ASSERT(cxt.opts->depth == 0);
+  ASSERT(cxt.opts->pending == 0);
+
+  SEXP out = list4( 
     msg,
     ScalarInteger(cxt.current - RAW(cxt.opts->buf)),
     ScalarString(mkChar(decode_return_code(cxt.return_code))),
-    ScalarInteger(cxt.current - cxt.start + cxt.opts->bytes_discarded),
     cxt.opts->buf);
   
-  ASSERT(cxt.opts->depth == 0);
-  ASSERT(cxt.opts->pending == 0);
   UNPROTECT(protections);
   return out;
 }

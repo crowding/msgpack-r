@@ -37,7 +37,7 @@ packMsg <- function(x, ...)  {
 #' unpackMsgs(x, 2)
 #' @export
 packMsgs <- function(xs, ...) {
- opts <- packOpts()
+ opts <- packOpts(...)
  unlist(lapply(xs, function(xx) .Call(`_pack_msg`, xx, opts)))
 }
 
@@ -49,7 +49,7 @@ packMsgs <- function(xs, ...) {
 #'   length 1. Otherwise singletons are simplified to msgpack scalars.
 #' @param use_dict If TRUE, vectors having a "names" attribute are
 #'   encoded as dicts. If false, they are encoded as arrays and the
-#'   names are discarded
+#'   names are discarded.
 #' @param max_size The largest buffer that will be allocated.
 #' @param buf_size The initial amount of memory, in bytes, to allocate
 #'   for packing each message. Currently there is little reason to

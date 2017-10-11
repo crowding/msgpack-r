@@ -48,8 +48,7 @@ unpackMsg <- function(x, ...) {
 #'   * `X$remaining` is data remaining to be parsed.
 #'   * `X$status` is a status message, typically "ok", "end of input",
 #'     or "buffer underflow".
-#'   * `X$bytes` is the number of bytes read at the end of the last
-#'     successfully read message.
+#'   * `x$bytes_read` the number of bytes consumed.
 #'
 #' @examples
 #' x <- packMsgs(list("one", "two", "three"))
@@ -57,61 +56,71 @@ unpackMsg <- function(x, ...) {
 #' @useDynLib msgpack _unpack_msg_partial
 #' @rdname unpackMsg
 #' @export
-unpackMsgs <- function(x, n=NA, ...) {
+unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
   if (is.na(n)) {
     n <- .Machine$integer.max
   }
 
-  nmsgs <- 0
-  offset <- 0
-  storeMessages <- catenator(list())
-  backlog <- catenator(raw(0))
+  offset <- 0                           # offset in current buffer "x"
+  bread <- 0                            # bytes read
+  saveMessage <- lister()               # messages read so far
+  saveData <- catenator(x)              # bytes read so far
+                                        # note invariant: saveData duplicates working buffwer
   status <- "ok"
 
-  underflow <- function(r, n) {
-    if (n > 0) {
-      backlog(x[1:n])
-    }
-    if (n < length(x)) {
-      c(x[(n+1):length(x)], getMore())
+  readMore <- function(buf,   # a raw
+                       x) {   # the number of bytes that have been consumed.
+    # To return: the unread bytes plus some new bytes.
+    #
+    # Observe the contortions that R's busted: operator makes us
+    # go through.
+    out <- if (x == 0) {
+      c(buf, saveData(reader()))
+    } else if (x == length(buf)) {
+      saveData(reader())
     } else {
-      getMore()
+      # If : were not busted we could just write this:
+      c(buf[(x+1):length(buf)], saveData(reader()))
     }
-  }; debug(underflow)
+    # Note 'seq' would be busted here too because seq(from=1, to=0,
+    # by=1) throws an error instead of a zero-length vector
+    return(out)
+  }
 
-  ## need to keep a backlog up to the beginning of last decoded
-  ## message, at least.
-  opts = unpackOpts(..., buf = x)
+  opts = unpackOpts(..., buf = x,
+                    underflow_handler = if (is.null(reader)) NULL else readMore)
   tryCatch(
-    while(storeMessages(action="length") < n) {
-      # this should be able to continuously parse and read and parse
-      # and read? Or that happens at a higher level?
+    while(saveMessage(action="length") < n) {
       result <- .Call(`_unpack_msg_partial`, offset, opts)
       status <- result[[3]]
       if (status == "ok") {
-        # we get here at the end of a successfully parsed message
-        storeMessages(list(result[[1]]))
-
-        # unpack_msg_partial should return the offset
-        # in the original message.
+        # got a good message,
+        # result <- list( message, new_offset, status, new_buffer)
+        # before we started, the catenator and working buffer overlapped at end.
+        saveMessage(result[[1]])
+        bread <- ( bread
+                 + (result[[2]] - offset)
+                 + (saveData(action="length") - length(result[[4]])))
         offset <- result[[2]]
-        x <- result[[5]]
+        x <- result[[4]]
+        saveData(result[[4]], action = "reset") # catenator and working buffer again overlap at end.
       } else {
+        # we also get exceptions from C code, so go to the exception handler
         stop(status)
       }
     },
     error = function(e) {
       status <<- e$message
-      # rewind to last successfully parsed message, somehow???
-      # ?????
+      x <<- saveData(action = "read")
+      saveData(action="reset", x)
+      # offset should be good from start of last read
     }
   )
 
-  list(msgs = storeMessages(action="read"),
-       remaining = if (offset < length(x))
-                     x[(offset+1):length(x)]
-                   else raw(0),
-       status = status)
+  list(msgs = saveMessage(action="read"),
+       remaining = if (offset < length(x)) x[(offset+1):length(x)] else raw(0),
+       status = status,
+       bytes_read = bread)
 }
 
 #' [unpackOpts()] interprets the options that are common to
@@ -119,26 +128,17 @@ unpackMsgs <- function(x, n=NA, ...) {
 #' exported.
 #'
 #' @param parent When an environment is given, (such as [emptyenv()]),
-#'     unpack msgpack dicts into environment objects, with the given
-#'     value as parent. This option overrides
-#'     `use_df=TRUE`. Otherwise, unpack dicts into named vectors /
-#'     lists.
+#'   unpack msgpack dicts into environment objects, with the given
+#'   value as parent. This option overrides `use_df=TRUE`. Otherwise,
+#'   unpack dicts into named vectors / lists.
 #' @param df When `TRUE`, convert msgpack dicts, whose elements are
-#'     all arrays having the same length, into [data.frame()]s.
+#'   all arrays having the same length, into [data.frame()]s.
 #' @param simplify If `TRUE`, simplify msgpack lists into primitive
-#'     vectors.
+#'   vectors.
 #' @param max_size The maximum length of message to decode.
 #' @param max_depth The maximum degree of nesting to support.
-#' @param underflow_handler Advanced usage, see below.
 #' @rdname unpackMsg
 #' @useDynLib msgpack _unpack_opts
-#'
-#' `underflow_handler` is for implementing reading from files or
-#' connections. It takes a `function(r, x)` where `r` is a raw object,
-#' `x < length(r)` is a 0-indexed offset within `r`, and `n` is a
-#' size. It should return a new raw object, whose data starts at the
-#' offset (i.e. including the leftover tail of r), and contains up to
-#' `n` bytes of new data.
 unpackOpts <- function(parent = NULL,
                        df = TRUE,
                        simplify = TRUE,

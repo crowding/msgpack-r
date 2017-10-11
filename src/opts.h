@@ -24,7 +24,6 @@ typedef struct unpack_opts {
   SEXP buf;
   PROTECT_INDEX buf_index;
   unsigned int depth;
-  unsigned long bytes_discarded;
   unsigned long pending;
   SEXP underflow_handler;
   

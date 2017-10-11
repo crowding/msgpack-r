@@ -23,27 +23,26 @@ test_that("consume N messages and return remaining data", {
   expect_equal(unpackMsgs(as.raw(1:10)),
                list(msgs = as.list(1:10),
                     remaining = raw(0),
-                    status = "end of input"))
+                    status = "end of input",
+                    bytes_read = 10))
 
   expect_equal(unpackMsgs(msgs),
                list(msgs = list("hello", "and"),
                     remaining = as.raw(c(0xa7, 0x67, 0x6f, 0x6f)),
-                    status = "buffer underflow"))
+                    status = "buffer underflow",
+                    bytes_read = 10))
 
   expect_equal(unpackMsgs(as.raw(c(0xa7, 0x6f, 0x6f))),
                list(msgs = list(),
                     remaining = as.raw(c(0xa7, 0x6f, 0x6f)),
-                    status = "buffer underflow"))
+                    status = "buffer underflow",
+                    bytes_read = 0))
 
   expect_equal(unpackMsgs(as.raw(c(1:10)), 3),
                list(msgs = as.list(1:3),
                     remaining = as.raw(4:10),
-                    status = "ok"))
-
-  expect_equal(unpackMsgs(as.raw(c(1:10))),
-               list(msgs = as.list(1:10),
-                    remaining = raw(0),
-                    status = "end of input"))
+                    status = "ok",
+                    bytes_read = 3))
 })
 
 test_that("packMsgs round trip", {
@@ -55,6 +54,7 @@ test_that("Errors raised in parsing are caught", {
 })
 
 test_that("read from a connection (blocking)", {
+
   conn <- msgConnection(rawConnection(msgs, open="r"))
   readMsg(conn) %is% "hello"
   readMsg(conn) %is% "and"
@@ -85,9 +85,10 @@ test_that("write to and read from connections", {
 })
 
 test_that("read non-blocking with complete message", {
-    test <- packMsgs("hello", "and",)
-    conn <- rawConnection(packMsgs(list("hello", "and", "world")), open="r")
-    conn <- msgConnection(conn, read_size = length(test))
+    test <- packMsgs(list("hello", "and"))
+    conn <- msgConnection(
+        rawConnection(packMsgs(list("hello", "and", "world")), open="r"),
+        read_size = length(test))
     readMsgs(conn) %is% list("hello", "and", "world")
 })
 
@@ -107,8 +108,19 @@ test_that("read non-blocking with incomplete message", {
   })
 })
 
+test_that("underflow at incomplete message (1-process)", {
+    buf <- rawBuffer()
+    partial <- packMsgs(list(1, "here is a partial message", 2))
+    writeRaw(partial[1:10], buf)
+    con <- msgConnection(buf)
+    readMsgs(con) %is% list(1)
+    writeRaw(partial[11:length(partial)], buf)
+    readMsgs(con) %is% list("here is a partial message", 2)
+    readMsgs(con) %is% list()
+})
+
 test_that("read non-blocking with array breaking over chunks", {
-    #this should at least trigger the underflow handler, no?
+    ##this should at least trigger the underflow handler, no?
     partial <- packMsgs(list("hello", 1:2))
     full <- packMsgs(list("hello", 1:10))
     conn <- rawConnection(full, open="r")
@@ -135,7 +147,8 @@ test_that("rawBuffer", {
     })
 })
 
-test_that("read non-blocking when variously interrupted", {
+test_that("read non-blocking and underflow handling when variously interrupted",
+{
     orig <- list("hello",
                  c("hello", "world"),
                  list("hello", "world", c(1, 2, 3)))
@@ -154,8 +167,42 @@ test_that("read non-blocking when variously interrupted", {
     }
 })
 
+test_that("assembling an array > read_size", {
+    mess <- (1:25) + rep(0, 1000)
+    c <- msgConnection(rawBuffer(raw(0)), read_size=32)
+    writeMsg(mess, c)
+    readMsgs(c) %is% list(mess)
+})
+
+test_that("resume from interrupt when message >> read_size",
+{
+    mess <- (1:25) + rep(0, 1000)
+    con <- msgConnection(rawBuffer(raw(0)), read_size=32)
+    bin <- packMsg(mess)
+    writeRaw(bin[1:100], con)
+    readMsgs(con) %is% list()
+    writeRaw(bin[101:200], con)
+    readMsgs(con) %is% list()
+    writeRaw(bin[201:length(bin)], con)
+    readMsgs(con) %is% list(mess)
+})
+
+test_that("Assembling a string >> read size", {
+    ## strings are individual messages that stretch over potentially many reads.
+    ## How does the underflow handler handle this?
+    mess <- paste0(letters[sample(26, 1000, replace=TRUE)], collapse="")
+    con <- msgConnection(rawBuffer(raw(0)), read_size=32)
+    writeMsgs(list(mess), con)
+    readMsgs(con) %is% list(mess)
+})
+
+test_that("seek method", {
+    stop("not written")
+})
+
 # I'd like to have some tests with reading/writing to a separate
 # process. I tried with parallel/mcfork, makeForkCluster, but forking
-# seems to cause weirdness with nonblocking. Subprocess package seems
-# to not have that prob. but the subprocess that is created doesn't
-# have my functions loaded.
+# seems to cause weirdness with nonblocking. (however this was before
+# I sorted out partial reads.) Subprocess package seems to not have
+# that prob. but the subprocess that is created doesn't have my
+# functions loaded.

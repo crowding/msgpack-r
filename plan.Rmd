@@ -1,10 +1,7 @@
 
 Plan of action:
 
-    * make the unpack underflow handler fire.
-    * make both `cw_unpack_context` and `unpack_opts_struct` into
-      one external pointer object, allocated in the opts() call (and filled out in the init() call)?
-      * Make it maintain state across read calls, even.
-      * Make sure you remember up to beginning of most recent partial message at R level.
-      * And the same with the writer? So as to write one buffer at a time?
-
+    * Make both `cw_unpack_context` and `unpack_opts_struct` into one
+      external pointer object, allocated in the opts() call (and
+      filled out in the init() call).
+    * Make the writer write out large messages in chunks.

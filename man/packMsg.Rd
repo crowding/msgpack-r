@@ -57,7 +57,7 @@ length 1. Otherwise singletons are simplified to msgpack scalars.}
 
 \item{use_dict}{If TRUE, vectors having a "names" attribute are
 encoded as dicts. If false, they are encoded as arrays and the
-names are discarded}
+names are discarded.}
 
 \item{max_size}{The largest buffer that will be allocated.}
 
