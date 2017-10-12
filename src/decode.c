@@ -62,9 +62,10 @@ SEXP _unpack_opts(SEXP dict,
   opts->package = package;
 
   opts->underflow_handler = underflow_handler;
-  opts->buf = buf; /* FIXME: but who holds this reference? Can't use
-                      protect_with_index if I'm returning
-                      to R. */
+  opts->buf = buf; /* TODO: But who holds this reference? Can't use
+                      protect_with_index if I'm returning to R. I'm
+                      just leaning on the R side of the package to
+                      hold this reference. */
   if (isNA(max_size)) opts->max_pending = ULONG_MAX;
   else opts->max_pending = asReal(max_size);
   if (isNA(max_depth)) opts->max_depth = UINT_MAX;
@@ -74,10 +75,12 @@ SEXP _unpack_opts(SEXP dict,
      this struct, hang the object references off of it.
      
      TODO: change this to be the R External Pointer mechanism instead? */
-  setAttrib(optsxp, install("refs"), CONS(dict,
-                                          CONS(package,
-                                               CONS(underflow_handler,
-                                                    R_NilValue))));
+  setAttrib(optsxp,
+            install("refs"),
+            CONS(dict,
+                 CONS(package,
+                      CONS(underflow_handler,
+                           R_NilValue))));
   UNPROTECT(1);
   return optsxp;
 }
@@ -85,7 +88,8 @@ SEXP _unpack_opts(SEXP dict,
 
 int init_unpack_context(cw_unpack_context *cxt,
                         SEXP optsxp,
-                        unsigned long start) {
+                        unsigned long start,
+                        unsigned long end) {
   assert_type(optsxp, RAWSXP);
   ASSERT(LENGTH(optsxp) == sizeof(unpack_opts));
 
@@ -96,25 +100,29 @@ int init_unpack_context(cw_unpack_context *cxt,
   SEXP buf = opts->buf;
   assert_type(buf, RAWSXP);
   ASSERT(start <= LENGTH(buf));
-  
-  if (cw_unpack_context_init(cxt, RAW(buf) + start, LENGTH(buf) - start, NULL))
-    error("Could not initiaize cw_unpack");
-  cxt->opts = opts;
-  
+
+  unpack_underflow_handler huu;
   if (opts->underflow_handler != R_NilValue) {
-    cxt->handle_unpack_underflow = &handle_unpack_underflow;
+    huu = &handle_unpack_underflow;
   } else {
-    cxt->handle_unpack_underflow = NULL;
+    huu = NULL;
   }
+
+  int r = cw_unpack_context_init(cxt, RAW(buf) + start, end - start, huu);
+  if (r)
+    error("Could not initiaize cw_unpack, %s", decode_return_code(r));
+
+  cxt->opts = opts;
   return 0;
 }
 
 
 
-SEXP _unpack_msg(SEXP opts) {
+SEXP _unpack_msg(SEXP optsxp) {
   calls++;
+  unpack_opts *opts = (unpack_opts *)(RAW(optsxp)); 
   cw_unpack_context cxt;
-  int protections = init_unpack_context(&cxt, opts, 0);
+  int protections = init_unpack_context(&cxt, optsxp, 0, LENGTH(opts->buf));
   LOG("depth = %u, pending = %lu", cxt.opts->depth, cxt.opts->pending); 
   SEXP out = extract_sexp(&cxt);
   LOG("depth = %u, pending = %lu", cxt.opts->depth, cxt.opts->pending); 
@@ -126,37 +134,57 @@ SEXP _unpack_msg(SEXP opts) {
 
 
 int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
-  /* bounce back to R to read X bytesanother buffer */
+  unsigned long need = x - ((cxt->end - cxt->current) / sizeof(*(cxt->end)));
+  /* bounce back to R to read X bytes */
   if (cxt->opts->underflow_handler != R_NilValue) {
-    assert_type(cxt->opts->underflow_handler, CLOSXP);
-    LOG("Calling underflow handler");
-    SEXP call = PROTECT(lang3(cxt->opts->underflow_handler,
-                              cxt->opts->buf,
-                              ScalarInteger(cxt->current - RAW(cxt->opts->buf))));
-    SEXP buf = PROTECT(eval(call, cxt->opts->package));
-    if (TYPEOF(buf) == RAWSXP
-        && buf != cxt->opts->buf
-        && LENGTH(buf) > (cxt->end - cxt->current)) {
-      LOG("Swapping buffers");
-      cxt->current = RAW(buf);
-      cxt->start = RAW(buf);
-      cxt->end = RAW(buf) + LENGTH(buf);
-      cxt->opts->buf = buf;
-      UNPROTECT(2);
-      return CWP_RC_OK;
-    } else {
-      LOG("No new data read");
-      return CWP_RC_END_OF_INPUT;
+    while(TRUE) {
+      assert_type(cxt->opts->underflow_handler, CLOSXP);
+      LOGD("Calling underflow handler, need %d", need);
+      SEXP call = PROTECT(lang2(cxt->opts->underflow_handler,
+                                ScalarInteger(cxt->current - RAW(cxt->opts->buf))));
+      /* result should be a list( rawsxp, start, end, current ) */
+      SEXP result = PROTECT(eval(call, cxt->opts->package));
+      assert_type(result, VECSXP);
+      ASSERT(LENGTH(result) == 4);
+      SEXP buf = VECTOR_ELT(result, 0);
+      assert_type(buf, RAWSXP);
+      unsigned long start = asInteger(VECTOR_ELT(result, 1));
+      unsigned long end = asInteger(VECTOR_ELT(result, 2));
+      unsigned long current = asInteger(VECTOR_ELT(result, 3));
+      unsigned long bread = (end - current) - (cxt->end - cxt->current); 
+      if (bread >= need) {
+        LOGD("Swapping buffers, ( 0x%x[%d:%d][%d] -> 0x%x[%d:%d][%d] )",
+             RAW(cxt->opts->buf),
+             cxt->start - RAW(cxt->opts->buf),
+             cxt->end - RAW(cxt->opts->buf),
+             cxt->current - RAW(cxt->opts->buf),
+             RAW(buf), start, end, current);
+
+        cxt->opts->buf = buf;
+        cxt->start = RAW(buf) + start;
+        cxt->end = RAW(buf) + end;
+        cxt->current = RAW(buf) + current;
+        UNPROTECT(2);
+        return CWP_RC_OK;
+      } else if (bread > 0) {
+        LOGD("Not enough new data read, got %d, need %d", bread, need); /* try again */
+        UNPROTECT(2);
+      } else {
+        LOGD("No new data read"); /* give up */
+        UNPROTECT(2);
+        return CWP_RC_END_OF_INPUT;        
+      }
     }
   } else {
-    LOG("No underflow handler");
+    LOGD("No underflow handler");
     return CWP_RC_END_OF_INPUT;
   }
 }
 
-SEXP _unpack_msg_partial(SEXP start, SEXP optsxp) {
-  /* Note that this must be able to cope with underflow handlers. */
 
+
+SEXP _unpack_msg_partial(SEXP startx, SEXP endx, SEXP optsxp) {
+  /* Note that this must be able to cope with underflow handlers. */
   /* count calls to see that callbacks are functioning... */
   calls++;
 
@@ -164,32 +192,33 @@ SEXP _unpack_msg_partial(SEXP start, SEXP optsxp) {
   assert_type(optsxp, RAWSXP);
   
   unpack_opts *opts = (unpack_opts *)RAW(optsxp);
-  LOG("Before: buf         = %x", RAW(opts->buf));
-  LOG("        start       = %x", asInteger(start));
-
-  int protections = init_unpack_context(&cxt, optsxp, asInteger(start));
-  LOG("        status      = %s", decode_return_code(cxt.return_code));
-  LOG("        cxt.start   = %x", cxt.start);
-  LOG("        cxt.current = %x", cxt.current);
+  unsigned long start = asInteger(startx);
+  unsigned long end = asInteger(endx);
+  int protections = init_unpack_context(&cxt, optsxp, start, end);
+  LOG("Before: buf = 0x%x[%d:%d][%d], status = '%s'",
+      RAW(opts->buf),
+      cxt.start - RAW(cxt.opts->buf),
+      cxt.end - RAW(cxt.opts->buf),
+      cxt.current - RAW(cxt.opts->buf),
+      decode_return_code(cxt.return_code));
 
   SEXP msg = PROTECT(extract_sexp(&cxt));
   protections++;
-  LOG("After,  buf         = %x", RAW(cxt.opts->buf));
-  LOG("        status      = %s", decode_return_code(cxt.return_code));
-  LOG("        cxt.start   = %x", cxt.start);
-  LOG("        cxt.current = %x", cxt.current);
+
+  LOG("After:  buf = 0x%x[%d:%d][%d], status = '%s'",
+      RAW(opts->buf),
+      cxt.start - RAW(cxt.opts->buf),
+      cxt.end - RAW(cxt.opts->buf),
+      cxt.current - RAW(cxt.opts->buf),
+      decode_return_code(cxt.return_code));
   
-  /* return a five item list: the message, the new offset (relative to
-     the possibly changed buffer), the status, the number of bytes
-     consumed, and the (possibly changed) buffer. */
   ASSERT(cxt.opts->depth == 0);
   ASSERT(cxt.opts->pending == 0);
 
-  SEXP out = list4( 
-    msg,
-    ScalarInteger(cxt.current - RAW(cxt.opts->buf)),
+  SEXP out = list3( 
     ScalarString(mkChar(decode_return_code(cxt.return_code))),
-    cxt.opts->buf);
+    msg,
+    ScalarInteger((cxt.current - RAW(cxt.opts->buf)) / sizeof(Rbyte)));
   
   UNPROTECT(protections);
   return out;

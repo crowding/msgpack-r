@@ -26,7 +26,7 @@ readMsgs(conn, n = NA, ...)
 
 status(conn)
 
-\method{status}{msgConnection}(conn, rw = "")
+\method{status}{msgConnection}(conn)
 
 \method{seek}{msgConnection}(con, where = NA, origin = "start",
   rw = summary(con)$mode)

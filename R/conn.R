@@ -33,7 +33,7 @@ msgConnection <- function(con, read_size=2^16, max_size=NA, ...) {
   bread <- 0
   bwrite <- 0
 
-  reader <- function(x) {
+  reader <- function(desired) {
     readRaw(con, read_size)
   }
 
@@ -42,7 +42,7 @@ msgConnection <- function(con, read_size=2^16, max_size=NA, ...) {
     msgs_bytes <- unpackMsgs(partial, n, max_size = max_size, reader = reader)
     partial <<- msgs_bytes$remaining
     status <<- msgs_bytes$status
-    bread <<- bread + msgs_bytes$bread
+    bread <<- bread + msgs_bytes$bytes_read
     msgs_bytes$msgs
   }
 
@@ -69,31 +69,71 @@ close.msgConnection <- function(con, ...) {
 }
 
 catenator <- function(val=c()) {
-  n <- length(val)
-  function(x=c(), action="store") {
+  # An in-memory FIFO type object.
+  #tracemem(val)
+  start <- 0
+  end <- length(val)
+  function(x, action="store", ..., opts) {
+
     switch(action,
+
            store = {
              lx <- length(x)
+             l <- length(val)
              if (lx > 0) {
-               l <- length(val)
-               if (lx + n > l) {
-                 length(val) <<- max(l + lx, 2 * l);
+               #check for overflow
+               if (end + lx > l && start > 0) {
+                 # rotate back to start
+                 if (start > 0 && end != start) {
+                   val[1:(end-start)] <- val[(start+1):end]
+                 }
+                 end <<- end - start
+                 start <<- 0
                }
-               val[ (n + 1):(n + lx) ] <<- x
-               n <<- n + lx
+               if (end + lx > l) {
+                 # double array length
+                 length(val) <<- max(end + lx, 2 * l);
+               }
+
+               #inject new values
+               val[ (end + 1):(end + lx) ] <<- x
+               end <<- end + lx
              }
              x
            },
+
            read = {
-             length(val) <<- n
-             val
+             if (end > start) {
+               val[(start+1):end]
+             } else val[c()]
            },
-           length = {
-             n
+
+           apply = {
+             x
            },
+
+           start = start,
+
+           length = end - start,
+
+           end = end,
+
+           contents = {
+             list(val, start, end)
+           },
+
            reset = {
              val <<- x
-             n <<- length(x)
+             start <<- 0
+             end <<- length(x)
+           },
+
+           drop = {
+             if (x <= end - start && x >= 0) {
+               start <<- start + x
+             } else {
+               stop("have ", end - start, ", can't drop ",  x)
+             }
            })
   }
 }
@@ -302,7 +342,7 @@ rawBuffer <- function(object = raw(0)) {
              },
              "w" = {
                ##convert a write buffer into a read buffer
-               val <<- rawConnectionValue(buf)
+               val <- rawConnectionValue(buf)
                close(buf)
                buf <<- rawConnection(val, open = "r")
                bytes <<- length(val)

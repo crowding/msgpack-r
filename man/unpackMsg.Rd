@@ -21,6 +21,9 @@ unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
 \item{n}{How many messages to read. An "NA" here means to read as
 much as possible.}
 
+\item{reader}{For implementing connections; a function that takes
+no arguments and returns a raw containing more data.}
+
 \item{parent}{When an environment is given, (such as \code{\link[=emptyenv]{emptyenv()}}),
 unpack msgpack dicts into environment objects, with the given
 value as parent. This option overrides \code{use_df=TRUE}. Otherwise,
@@ -64,7 +67,7 @@ it will be converted to string with \code{\link[=deparse]{deparse()}}.
 Extension types will be decoded as raw objects with a class like
 \code{"ext120"} and a warning.
 
-\code{unpackMsgs(r, n)} returns a list \code{X} with three elements:
+\code{unpackMsgs(r, n)} returns a list \code{X} with four elements:
 \itemize{
 \item \code{X$msgs} is a list of the messages unpacked.
 \item \code{X$remaining} is data remaining to be parsed.

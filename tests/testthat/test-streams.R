@@ -74,9 +74,14 @@ test_that("write to a connection", {
   expect_equal(
     unpackMsgs(rawConnectionValue(conn))$msgs,
     c(list(1:10), as.list(1:10)))
+  close(conn)
 })
 
 test_that("write to and read from connections", {
+  con <- msgConnection(rawBuffer(raw(0)))
+  writeMsgs(1:10, con)
+  readMsgs(con) %is% as.list(1:10)
+  close(con)
   two_ends(function(A, B) {
     writeMsgs(1:10, A)
     flush(A)
@@ -90,6 +95,7 @@ test_that("read non-blocking with complete message", {
         rawConnection(packMsgs(list("hello", "and", "world")), open="r"),
         read_size = length(test))
     readMsgs(conn) %is% list("hello", "and", "world")
+    close(conn)
 })
 
 test_that("read non-blocking with incomplete message", {
@@ -117,6 +123,7 @@ test_that("underflow at incomplete message (1-process)", {
     writeRaw(partial[11:length(partial)], buf)
     readMsgs(con) %is% list("here is a partial message", 2)
     readMsgs(con) %is% list()
+    close(con)
 })
 
 test_that("read non-blocking with array breaking over chunks", {
@@ -126,6 +133,7 @@ test_that("read non-blocking with array breaking over chunks", {
     conn <- rawConnection(full, open="r")
     conn <- msgConnection(conn, read_size = length(partial))
     readMsgs(conn) %is% list("hello", 1:10)
+    close(conn)
 })
 
 test_that("rawBuffer", {
@@ -149,12 +157,10 @@ test_that("rawBuffer", {
 
 test_that("read non-blocking and underflow handling when variously interrupted",
 {
-    orig <- list("hello",
-                 c("hello", "world"),
-                 list("hello", "world", c(1, 2, 3)))
+    orig <- list("hello",  c("hello", "world"), list("hello", "world", c(1, 2, 3)))
     packed <- packMsgs(orig)
 
-    cut <- 7
+    cut <- 28
     for (cut in 1:(length(packed) - 1)) {
         firstChunk <- packed[1:cut]
         secondChunk <- packed[  (cut+1) : (length(packed)) ]
@@ -172,6 +178,7 @@ test_that("assembling an array > read_size", {
     c <- msgConnection(rawBuffer(raw(0)), read_size=32)
     writeMsg(mess, c)
     readMsgs(c) %is% list(mess)
+    close(c)
 })
 
 test_that("resume from interrupt when message >> read_size",
@@ -185,19 +192,38 @@ test_that("resume from interrupt when message >> read_size",
     readMsgs(con) %is% list()
     writeRaw(bin[201:length(bin)], con)
     readMsgs(con) %is% list(mess)
+    close(con)
 })
 
 test_that("Assembling a string >> read size", {
     ## strings are individual messages that stretch over potentially many reads.
-    ## How does the underflow handler handle this?
     mess <- paste0(letters[sample(26, 1000, replace=TRUE)], collapse="")
     con <- msgConnection(rawBuffer(raw(0)), read_size=32)
     writeMsgs(list(mess), con)
     readMsgs(con) %is% list(mess)
+    expect_equal(seek(con, rw="r"), 1003)
+    close(con)
 })
 
 test_that("seek method", {
-    stop("not written")
+    con = msgConnection(rawConnection(msgs, open="r"))
+    readMsgs(con)
+    seek(con) %is% 10
+    close(con)
+
+    con = msgConnection(rawConnection(msgs, open="w"))
+    writeMsg("hello", con)
+    seek(con) %is% 6
+    close(con)
+
+    con = msgConnection(rawBuffer())
+    writeMsg("hello", con)
+    expect_error(seek(con))
+    seek(con, rw = "w") %is% 6
+    seek(con, rw = "r") %is% 0
+    readMsg(con)
+    seek(con, rw = "r") %is% 6
+    close(con)
 })
 
 # I'd like to have some tests with reading/writing to a separate

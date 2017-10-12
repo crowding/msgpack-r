@@ -43,7 +43,9 @@ unpackMsg <- function(x, ...) {
 #'
 #' @param n How many messages to read. An "NA" here means to read as
 #'   much as possible.
-#' @return `unpackMsgs(r, n)` returns a list `X` with three elements:
+#' @param reader For implementing connections; a function that takes
+#'   no arguments and returns a raw containing more data.
+#' @return `unpackMsgs(r, n)` returns a list `X` with four elements:
 #'   * `X$msgs` is a list of the messages unpacked.
 #'   * `X$remaining` is data remaining to be parsed.
 #'   * `X$status` is a status message, typically "ok", "end of input",
@@ -61,64 +63,55 @@ unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
     n <- .Machine$integer.max
   }
 
-  offset <- 0                           # offset in current buffer "x"
   bread <- 0                            # bytes read
   saveMessage <- lister()               # messages read so far
-  saveData <- catenator(x)              # bytes read so far
-                                        # note invariant: saveData duplicates working buffwer
+  saveData <- catenator(x)              # bytes pending
+  offset <- 0                           # position within buffer
+
   status <- "ok"
 
-  readMore <- function(buf,   # a raw
-                       x) {   # the number of bytes that have been consumed.
-    # To return: the unread bytes plus some new bytes.
-    #
-    # Observe the contortions that R's busted: operator makes us
-    # go through.
-    out <- if (x == 0) {
-      c(buf, saveData(reader()))
-    } else if (x == length(buf)) {
-      saveData(reader())
-    } else {
-      # If : were not busted we could just write this:
-      c(buf[(x+1):length(buf)], saveData(reader()))
-    }
-    # Note 'seq' would be busted here too because seq(from=1, to=0,
-    # by=1) throws an error instead of a zero-length vector
-    return(out)
+  readMore <- function(current, desired) {
+    start <- saveData(action="start")
+    saveData(reader(desired))
+    new_start <- saveData(action="start")
+    current <- new_start - start + current
+    result <- c(saveData(action="contents"), current)
+    # cat("after read: "); print(saveData(action="contents"))
+    result
   }
 
   opts = unpackOpts(..., buf = x,
                     underflow_handler = if (is.null(reader)) NULL else readMore)
+
+  # cat("buffer: "); print(saveData(action="contents"))
   tryCatch(
     while(saveMessage(action="length") < n) {
-      result <- .Call(`_unpack_msg_partial`, offset, opts)
-      status <- result[[3]]
+      last_start <- saveData(action="start")
+      result <- .Call(`_unpack_msg_partial`, offset, saveData(action="end"), opts)
+      ## result is a pairlist( message, status, new_offset )
+      # cat("unpack result: "); print(result)
+      status <- result[[1]]
       if (status == "ok") {
         # got a good message,
-        # result <- list( message, new_offset, status, new_buffer)
-        # before we started, the catenator and working buffer overlapped at end.
-        saveMessage(result[[1]])
-        bread <- ( bread
-                 + (result[[2]] - offset)
-                 + (saveData(action="length") - length(result[[4]])))
-        offset <- result[[2]]
-        x <- result[[4]]
-        saveData(result[[4]], action = "reset") # catenator and working buffer again overlap at end.
+        saveMessage(result[[2]])
+        message_length <- ((result[[3]] - offset) +
+                           (saveData(action="start") - last_start))
+        bread <- bread + message_length
+        saveData(message_length, action="drop")
+        offset <- result[[3]]
+        # cat("after 1 msg, buffer: "); print(saveData(action="contents"))
       } else {
-        # we also get exceptions from C code, so go to the exception handler
         stop(status)
       }
     },
     error = function(e) {
       status <<- e$message
-      x <<- saveData(action = "read")
-      saveData(action="reset", x)
-      # offset should be good from start of last read
     }
   )
+  # cat("after failure, buffer: "); print(saveData(action="contents"))
 
   list(msgs = saveMessage(action="read"),
-       remaining = if (offset < length(x)) x[(offset+1):length(x)] else raw(0),
+       remaining = saveData(action="read"),
        status = status,
        bytes_read = bread)
 }
