@@ -11,7 +11,7 @@ unpackMsg(x, ...)
 unpackMsgs(x, n = NA, reader = NULL, ...)
 
 unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
-  max_depth = NA, underflow_handler = NULL, buf = raw(0))
+  max_depth = NA, underflow_handler = NULL, x = raw(0))
 }
 \arguments{
 \item{x}{A \code{\link[=raw]{raw()}} object, perhaps read from a file or socket.}
@@ -38,6 +38,8 @@ vectors.}
 \item{max_size}{The maximum length of message to decode.}
 
 \item{max_depth}{The maximum degree of nesting to support.}
+
+\item{underflow_handler}{Used internally.}
 }
 \value{
 \code{unpackMsg(x)} returns one decoded message (which might be

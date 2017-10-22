@@ -18,18 +18,17 @@ msgConnection(con, read_size = 2^16, max_size = NA, ...)
 
 \method{close}{msgConnection}(con, ...)
 
-partial(conn)
+partial(con)
 
-\method{partial}{msgConnection}(conn)
+\method{partial}{msgConnection}(con)
 
-readMsgs(conn, n = NA, ...)
+readMsgs(con, n = NA, ...)
 
-status(conn)
+status(con)
 
-\method{status}{msgConnection}(conn)
+\method{status}{msgConnection}(con)
 
-\method{seek}{msgConnection}(con, where = NA, origin = "start",
-  rw = summary(con)$mode)
+\method{seek}{msgConnection}(con, rw = summary(con)$mode, ...)
 
 readMsg(con, ...)
 
@@ -38,6 +37,8 @@ writeMsg(obj, con, ...)
 writeMsgs(objs, con, ...)
 }
 \arguments{
+\item{con}{A \link{connection} object open in binary mode.}
+
 \item{read_size}{How many bytes to read at a time.}
 
 \item{max_size}{The largest partial uncompleted message to
@@ -45,10 +46,12 @@ store. \code{NA} means do not enforce a limit.}
 
 \item{...}{Unpacking options (see \link{unpackMsg}).}
 
-\item{conn}{A \link{connection} object open in binary mode.}
-
 \item{n}{The maximum number of messages to read. A value of NA
 means to parse all available messages until end of input.}
+
+\item{rw}{See \code{seek()}.}
+
+\item{obj}{An R object.}
 
 \item{objs}{A list of R objects.}
 }
@@ -67,19 +70,24 @@ will probably want to give options \code{max_size} and \code{max_depth} (see
 messages can cause a stack overflow or out-of-memory error.  With
 these options set, you will get an R exception instead.
 
+\code{partial(con)} returns any data that has been read ahead of
+the last decoded message.
+
 A list of up to \code{n} decoded messages.
 
-\code{status(conn)} returns the status of msgpack decoding on the
+\code{status(con)} returns the status of msgpack decoding on the
 connection. A value of \code{"ok"} indicates all requested messages
 were read, \code{"buffer underflow"} indicates a partial message is on
 the line, \code{"end of input"} means the last available message has
 been read.  Other values indicate errors encountered in decoding,
 which will effectively halt reading.
 
-\code{readMsg(conn)} returns exactly one message, or throws an error.
+\code{readMsg(con)} returns exactly one message, or throws an error.
 }
 \description{
 Read and write msgpack messages using a connection.
+
+...
 
 ...
 

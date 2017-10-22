@@ -1,15 +1,12 @@
 Package: msgpack
-Title: A Fast, Compact Binary Data Format
+Title: A Blazing Fast Structured Data Format.
 Version: 0.99.0
 Author: Peter Meilstrup <peter.meilstrup@gmail.com>
 Maintainer: Peter Meilstrup <peter.meilstrup@gmail.com>
-Description: A fast C-based encoder and decoder for msgpack data format.
-             Msgpack is a binary data format, similar in structure to
-             JSON, useful for storing, transmitting, and exchanging structured
-             data. There are implementations of msgpack for many
-             popular programming languages. Compared to JSON, msgpack
-             uses fewer bytes and is faster to encode and decode. This package
-             translates between msgpack format and R data structures.
+Description: An extremely fast C-based encoder and streaming decoder for the
+             msgpack data format, Msgpack is nearly a
+             drop-in replacement for JSON, but is more compact and
+             faster to parse. Based on the CWPack C library.
 Depends:
     R (>= 3.3.1)
 License: MIT + file LICENSE

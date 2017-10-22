@@ -1,7 +1,0 @@
-
-Plan of action:
-
-    * Make both `cw_unpack_context` and `unpack_opts_struct` into one
-      external pointer object, allocated in the opts() call (and
-      filled out in the init() call).
-    * Make the writer write out large messages in chunks.

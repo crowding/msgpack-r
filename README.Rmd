@@ -1,0 +1,37 @@
+# msgpack for R
+
+This is a fast msgpack encoder and decoder for R, based on the
+[CWPack][1] C implementation.
+1: https://github.com/clwi/CWPack
+
+`msgpack` is a binary data format with compact encoding and data
+structure support similar to JSON. It can be a drop-in replacementfor
+JSON in most applications. It is very fast to parse and compact to
+transmit and store.
+
+## Installation
+
+```{R}
+library(devtools)
+install_github("crowding/msgpack-r")
+```
+
+## Usage
+
+```{R}
+library(msgpack)
+packMsg( list(compact=TRUE, schema=0) )
+unpackMsg( .Last.value )
+```
+
+### Streaming
+
+```{r}
+
+```
+
+### Performance and compactness
+
+```{R}
+
+```

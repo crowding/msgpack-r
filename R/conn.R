@@ -1,6 +1,6 @@
 #' Read and write msgpack messages using a connection.
 #'
-#' @param conn A [connection] object open in binary mode.
+#' @param con A [connection] object open in binary mode.
 #' @param max_size The largest partial uncompleted message to
 #'   store. `NA` means do not enforce a limit.
 #' @param read_size How many bytes to read at a time.
@@ -34,6 +34,7 @@ msgConnection <- function(con, read_size=2^16, max_size=NA, ...) {
   bwrite <- 0
 
   reader <- function(desired) {
+    # ignore "desired" and just read non-blockingly.
     readRaw(con, read_size)
   }
 
@@ -55,9 +56,10 @@ msgConnection <- function(con, read_size=2^16, max_size=NA, ...) {
   structure(addClass(con, "msgConnection"), reader = environment())
 }
 
-summary.msgConnection <- function(con, ...) {
+#' @export
+summary.msgConnection <- function(object, ...) {
   s <- NextMethod("summary")
-  c(s, list(status = status(con)))
+  c(s, list(status = status(object)))
 }
 
 # TODO: read raw method, to interleave with readMsgs.
@@ -76,7 +78,6 @@ catenator <- function(val=c()) {
   function(x, action="store", ..., opts) {
 
     switch(action,
-
            store = {
              lx <- length(x)
              l <- length(val)
@@ -99,6 +100,7 @@ catenator <- function(val=c()) {
                val[ (end + 1):(end + lx) ] <<- x
                end <<- end + lx
              }
+             dbg("lx", lx, "start", start, "end", end, "\n")
              x
            },
 
@@ -165,14 +167,18 @@ lister <- function(val = list()) {
 
 addClass <- function(x, classes) structure(x, class = c(classes, class(x)))
 
+#' ...
+#'
+#' @return `partial(con)` returns any data that has been read ahead of
+#'   the last decoded message.
 #' @rdname msgConnection
 #' @export
-partial <- function(conn) UseMethod("partial")
+partial <- function(con) UseMethod("partial")
 
 #' @rdname msgConnection
 #' @export
-partial.msgConnection <- function(conn) {
-  attr(conn, "reader")$partial
+partial.msgConnection <- function(con) {
+  attr(con, "reader")$partial
 }
 
 #' @rdname msgConnection
@@ -180,31 +186,31 @@ partial.msgConnection <- function(conn) {
 #' @param n The maximum number of messages to read. A value of NA
 #'     means to parse all available messages until end of input.
 #' @return A list of up to `n` decoded messages.
-readMsgs <- function(conn, n = NA, ...) {
+readMsgs <- function(con, n = NA, ...) {
   UseMethod("readMsgs")
 }
 
 #' @export
-readMsgs.msgConnection <- function(conn, n = NA, ...) {
-  attr(conn, "reader")$readMsgs(n, ...)
+readMsgs.msgConnection <- function(con, n = NA, ...) {
+  attr(con, "reader")$readMsgs(n, ...)
 }
 
 #' ...
 #'
 #' @rdname msgConnection
-#' @return `status(conn)` returns the status of msgpack decoding on the
+#' @return `status(con)` returns the status of msgpack decoding on the
 #'   connection. A value of `"ok"` indicates all requested messages
 #'   were read, `"buffer underflow"` indicates a partial message is on
 #'   the line, `"end of input"` means the last available message has
 #'   been read.  Other values indicate errors encountered in decoding,
 #'   which will effectively halt reading.
 #' @export
-status <- function(conn) UseMethod("status")
+status <- function(con) UseMethod("status")
 
 #' @rdname msgConnection
 #' @export
-status.msgConnection <- function(conn) {
-  attr(conn, "reader")$status
+status.msgConnection <- function(con) {
+  attr(con, "reader")$status
 }
 
 
@@ -213,11 +219,9 @@ status.msgConnection <- function(conn) {
 #' `seek(con)` returns the number of bytes that have been successfully
 #' read or written.
 #' @rdname msgConnection
+#' @param rw See `seek()`.
 #' @export
-seek.msgConnection <- function(con, where=NA, origin = "start", rw = summary(con)$mode) {
-  if (!is.na(where)) {
-    stop("Can't seek a msgConnection")
-  }
+seek.msgConnection <- function(con, rw = summary(con)$mode, ...) {
   rw <- pmatch(rw, c("read", "write"), 0L)
   switch(rw,
          attr(con, "reader")$bread,
@@ -228,16 +232,17 @@ seek.msgConnection <- function(con, where=NA, origin = "start", rw = summary(con
 #' ...
 #'
 #' @rdname msgConnection
-#' @return `readMsg(conn)` returns exactly one message, or throws an error.
+#' @return `readMsg(con)` returns exactly one message, or throws an error.
 #' @export
 readMsg <- function(con, ...) {
   UseMethod("readMsg", con)
 }
 
-readMsg.msgConnection <- function(conn, ...) {
-  x <- readMsgs(conn, 1, ...)
+#' @export
+readMsg.msgConnection <- function(con, ...) {
+  x <- readMsgs(con, 1, ...)
   if (length(x) < 1) {
-    stop(status(conn))
+    stop(status(con))
   }
   x[[1]]
 }
@@ -245,17 +250,20 @@ readMsg.msgConnection <- function(conn, ...) {
 #' ...
 #'
 #' @rdname msgConnection
+#' @param obj An R object.
 #' @export
 writeMsg <- function(obj, con, ...) {
   UseMethod("writeMsg", con)
 }
 
-writeMsg.connection <- function(obj, conn, ...) {
-  writeMsgs(list(obj), conn, ...)
+#' @export
+writeMsg.connection <- function(obj, con, ...) {
+  writeMsgs(list(obj), con, ...)
 }
 
-writeMsg.msgConnection <- function(obj, conn, ...) {
-  writeMsgs(list(obj), conn, ...)
+#' @export
+writeMsg.msgConnection <- function(obj, con, ...) {
+  writeMsgs(list(obj), con, ...)
 }
 
 #' ...
@@ -265,23 +273,24 @@ writeMsg.msgConnection <- function(obj, conn, ...) {
 #'   message containing an array, while `writeMsgs(1:10, conn)` writes
 #'   ten consecutive messages each containing one integer.
 #' @rdname msgConnection
-#' @export
 #' @param objs A list of R objects.
+#' @export
 writeMsgs <- function(objs, con, ...) {
   UseMethod("writeMsgs", con)
 }
 
-writeMsgs.connection <- function(objs, conn, ...) {
-  writeRaw(packMsgs(objs, ...), conn)
+#' @export
+writeMsgs.connection <- function(objs, con, ...) {
+  writeRaw(packMsgs(objs, ...), con)
 }
 
-writeMsgs.msgConnection <- function(objs, conn, ...) {
+#' @export
+writeMsgs.msgConnection <- function(objs, con, ...) {
   buf <- packMsgs(objs, ...)
-  result <- writeRaw(buf, conn)
-  attr(conn, "reader")$bwrite <- attr(conn, "reader")$bwrite + length(buf)
+  result <- writeRaw(buf, con)
+  attr(con, "reader")$bwrite <- attr(con, "reader")$bwrite + length(buf)
   invisible(result)
 }
-
 
 ## To support test harness, we use "readRaw" and "writeRaw"
 ## internally, instead of "readBin" which is not an S3 method
@@ -289,22 +298,21 @@ readRaw <- function(con, n, ...) {
   UseMethod("readRaw")
 }
 
-
 writeRaw <- function(object, con, ...) {
   UseMethod("writeRaw", con)
 }
 
-
-readRaw.connection <- function(conn, n) {
+readRaw.connection <- function(con, n) {
   # I get errors thrown (sometimes) when reading at the end of
   # a nonblocking fifo.
-  tryCatch(readBin(conn, 'raw', n),
-           error=function(e) {
-             #warning("Ignoring ", e)
-             raw(0)
-           })
+  tryCatch({
+    readBin(con, 'raw', n)
+  },
+  error=function(e) {
+    warning("Ignoring ", e)
+    raw(0)
+  })
 }
-
 
 writeRaw.connection <- function(object, con, ...) {
     writeBin(object, con, ...)

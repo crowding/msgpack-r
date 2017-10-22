@@ -338,8 +338,3 @@ test_that("extension types unpacked as raw with a class attr", {
   expect_warning(d <- unpackMsg(x), "raw")
   expect_equal(d, structure(as.raw(0xdd), class="ext127"))
 })
-
-## Local Variables:
-## ess-r-package-info: ("msgpackr" . "~/msgpackr/")
-## End:
-

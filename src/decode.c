@@ -137,11 +137,13 @@ int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
   unsigned long need = x - ((cxt->end - cxt->current) / sizeof(*(cxt->end)));
   /* bounce back to R to read X bytes */
   if (cxt->opts->underflow_handler != R_NilValue) {
+    unsigned long had = 0;
     while(TRUE) {
       assert_type(cxt->opts->underflow_handler, CLOSXP);
-      LOGD("Calling underflow handler, need %d", need);
-      SEXP call = PROTECT(lang2(cxt->opts->underflow_handler,
-                                ScalarInteger(cxt->current - RAW(cxt->opts->buf))));
+      LOGD("Asking R to read %d bytes", need - had);
+      SEXP call = PROTECT(lang3(cxt->opts->underflow_handler,
+                                ScalarInteger(cxt->current - RAW(cxt->opts->buf)),
+                                ScalarInteger(need - had)));
       /* result should be a list( rawsxp, start, end, current ) */
       SEXP result = PROTECT(eval(call, cxt->opts->package));
       assert_type(result, VECSXP);
@@ -151,8 +153,8 @@ int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
       unsigned long start = asInteger(VECTOR_ELT(result, 1));
       unsigned long end = asInteger(VECTOR_ELT(result, 2));
       unsigned long current = asInteger(VECTOR_ELT(result, 3));
-      unsigned long bread = (end - current) - (cxt->end - cxt->current); 
-      if (bread >= need) {
+      unsigned long have = (end - current) - (cxt->end - cxt->current);
+      if (have >= need) {
         LOGD("Swapping buffers, ( 0x%x[%d:%d][%d] -> 0x%x[%d:%d][%d] )",
              RAW(cxt->opts->buf),
              cxt->start - RAW(cxt->opts->buf),
@@ -166,11 +168,14 @@ int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
         cxt->current = RAW(buf) + current;
         UNPROTECT(2);
         return CWP_RC_OK;
-      } else if (bread > 0) {
-        LOGD("Not enough new data read, got %d, need %d", bread, need); /* try again */
+      } else if (have > had) {
+        LOGD("Not enough new data read, have %d, need %d", have, need);
+        /* try again */
+        had = have;
         UNPROTECT(2);
       } else {
-        LOGD("No new data read"); /* give up */
+        LOGD("No new data read");
+        /* give up */
         UNPROTECT(2);
         return CWP_RC_END_OF_INPUT;        
       }
@@ -216,9 +221,11 @@ SEXP _unpack_msg_partial(SEXP startx, SEXP endx, SEXP optsxp) {
   ASSERT(cxt.opts->pending == 0);
 
   SEXP out = list3( 
-    ScalarString(mkChar(decode_return_code(cxt.return_code))),
+    PROTECT(ScalarString(mkChar(decode_return_code(cxt.return_code)))),
     msg,
-    ScalarInteger((cxt.current - RAW(cxt.opts->buf)) / sizeof(Rbyte)));
+    PROTECT(ScalarInteger((cxt.current - RAW(cxt.opts->buf)) / sizeof(Rbyte))));
+  
+  protections += 2;
   
   UNPROTECT(protections);
   return out;

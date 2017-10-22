@@ -21,13 +21,12 @@
 #' Object attributes other than `name` and `class` are ignored.
 #'
 #' @param ... Options controlling packing, as described on this page.
-#' @useDynLib msgpack _pack_msg
 #' @return An object of class "raw".
 #' @examples
 #' packMsg( list(compact=TRUE, schema=0) )
 #' @export
 packMsg <- function(x, ...)  {
-  .Call(`_pack_msg`, x, packOpts(...))
+  .Call("_pack_msg", x, packOpts(...))
 }
 
 #' @param xs a list of objects to pack.
@@ -38,7 +37,7 @@ packMsg <- function(x, ...)  {
 #' @export
 packMsgs <- function(xs, ...) {
  opts <- packOpts(...)
- unlist(lapply(xs, function(xx) .Call(`_pack_msg`, xx, opts)))
+ unlist(lapply(xs, function(xx) .Call("_pack_msg", xx, opts)))
 }
 
 #' @param compatible If TRUE, emitted bytes conform to version 1.0 of
@@ -55,13 +54,12 @@ packMsgs <- function(xs, ...) {
 #'   for packing each message. Currently there is little reason to
 #'   change this.
 #' @rdname packMsg
-#' @useDynLib msgpack _pack_opts
 packOpts <- function(compatible = FALSE,
                     as_is = FALSE,
                     use_dict = TRUE,
                     max_size = NA,
                     buf_size = 512) {
-  .Call(`_pack_opts`,
+  .Call("_pack_opts",
         compatible,
         as_is,
         use_dict,

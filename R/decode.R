@@ -29,15 +29,18 @@
 #' Extension types will be decoded as raw objects with a class like
 #' `"ext120"` and a warning.
 #'
-#' @useDynLib msgpack _unpack_msg
+#' @useDynLib msgpack, .registration = TRUE
 #' @examples
 #' msg <- as.raw(c(0x82, 0xa7, 0x63, 0x6f, 0x6d, 0x70, 0x61, 0x63, 0x74, 0xc3,
 #'                 0xa6, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x00))
 #' unpackMsg(msg)
 #' @export
 unpackMsg <- function(x, ...) {
-  .Call(`_unpack_msg`, unpackOpts(..., buf=x))
+  .Call("_unpack_msg", unpackOpts(..., x=x))
 }
+
+#dbg <- alist
+dbg <- cat
 
 #' Extract a number of msgpack messages from a raw object.
 #'
@@ -55,7 +58,6 @@ unpackMsg <- function(x, ...) {
 #' @examples
 #' x <- packMsgs(list("one", "two", "three"))
 #' unpackMsgs(x, 2)
-#' @useDynLib msgpack _unpack_msg_partial
 #' @rdname unpackMsg
 #' @export
 unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
@@ -71,6 +73,8 @@ unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
   status <- "ok"
 
   readMore <- function(current, desired) {
+    dbg("readMore:", "current =", current, "\n")
+    dbg("readMore:", "desired =", desired, "\n")
     start <- saveData(action="start")
     saveData(reader(desired))
     new_start <- saveData(action="start")
@@ -80,14 +84,14 @@ unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
     result
   }
 
-  opts = unpackOpts(..., buf = x,
+  opts = unpackOpts(..., x = x,
                     underflow_handler = if (is.null(reader)) NULL else readMore)
 
   # cat("buffer: "); print(saveData(action="contents"))
   tryCatch(
     while(saveMessage(action="length") < n) {
       last_start <- saveData(action="start")
-      result <- .Call(`_unpack_msg_partial`, offset, saveData(action="end"), opts)
+      result <- .Call("_unpack_msg_partial", offset, saveData(action="end"), opts)
       ## result is a pairlist( message, status, new_offset )
       # cat("unpack result: "); print(result)
       status <- result[[1]]
@@ -105,6 +109,8 @@ unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
       }
     },
     error = function(e) {
+      cat("exception: ")
+      str(e)
       status <<- e$message
     }
   )
@@ -130,16 +136,16 @@ unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
 #'   vectors.
 #' @param max_size The maximum length of message to decode.
 #' @param max_depth The maximum degree of nesting to support.
+#' @param underflow_handler Used internally.
 #' @rdname unpackMsg
-#' @useDynLib msgpack _unpack_opts
 unpackOpts <- function(parent = NULL,
                        df = TRUE,
                        simplify = TRUE,
                        max_size = NA,
                        max_depth = NA,
                        underflow_handler = NULL,
-                       buf = raw(0)) {
-  .Call(`_unpack_opts`,
+                       x = raw(0)) {
+  .Call("_unpack_opts",
         parent,
         df,
         simplify,
@@ -147,7 +153,7 @@ unpackOpts <- function(parent = NULL,
         max_size,
         max_depth,
         underflow_handler,
-        buf);
+        x);
 }
 
 # Come up with a name when a non-string is used as key.
