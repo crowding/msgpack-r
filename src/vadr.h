@@ -20,7 +20,7 @@
       }                                         \
     })
 
-#undef DEBUG 
+#define DEBUG 
 
 #ifdef DEBUG
 #define LOG(FMT, ...) Rprintf("%s: "  FMT " @%s:%d\n",   \

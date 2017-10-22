@@ -226,9 +226,63 @@ test_that("seek method", {
     close(con)
 })
 
+`%@%` <- function(x, name) {
+  attr(x, as.character(substitute(name)))
+}
+
+test_that("large blob under gctorture", {
+
+  data <- sample(as.raw(0:255), 0x1000000, TRUE)
+  con <- msgConnection(rawConnection(raw(0), open="wb"))
+  packet <- packMsg(data)
+  writeMsg(data, con)
+  bytes <- rawConnectionValue(con)
+  close(con)
+  con2 <- msgConnection(rawConnection(bytes, open="rb"))
+  as.read <- NULL
+  local({
+    gctorture(TRUE)
+    on.exit(gctorture(FALSE))
+    # getting Error: RAW() can only be applied to a 'raw', not a 'NULL'
+    # I think perhaps because the buffer gets collected.
+    # I should hold an external pointer to the buffer, then?
+    # gctorture triggers an early error "2" so yeah.
+    # any way to debug GC, though?
+    as.read <<- readMsg(con2)
+  })
+  close(con2)
+  expect_identical(as.read, data)
+
+})
+
+
+
+## When I single stepped through, what I got was this:
+
+## handle_unpack_underflow:  Swapping buffers, ( 0x80005228[0:65536][5] -> 0x263fe028[0:16777221][5] ) @decode.c:163
+## make_sexp_from_context:  Making sexp from a binary @decode.c:269
+## _unpack_msg_partial: After:  buf = 0x263fe028[0:16777221][16777221], status = 'ok' @decode.c:218
+
+
+
 # I'd like to have some tests with reading/writing to a separate
 # process. I tried with parallel/mcfork, makeForkCluster, but forking
 # seems to cause weirdness with nonblocking. (however this was before
 # I sorted out partial reads.) Subprocess package seems to not have
 # that prob. but the subprocess that is created doesn't have my
 # functions loaded.
+
+print.raw <- function(x, max.print = getOption("max.print"), ...) {
+  # Display raw vectors as hex dumps. Debugging use, not exported.
+  con <- pipe("hexdump -C", "wb")
+  if (length(x) > max.print) {
+    writeBin(x[1:max.print], con)
+    close(con)
+    cat(paste0("[ reached getOption(\"max.print\") -- omitted ",
+               length(x) - max.print,
+               " entries ] \n"))
+  } else {
+    writeBin(x, con[1:max.print])
+    close(con)
+  }
+}
