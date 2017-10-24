@@ -1,7 +1,8 @@
 #ifndef OPTS_H
 #define OPTS_H
 
-#include <RInternals.h>
+#include <R.h>
+#include <Rinternals.h>
 
 /* To hand options down from R code into the callbacks, I attach this
    options structure to the CWpack state structures. 

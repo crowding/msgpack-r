@@ -20,7 +20,7 @@
       }                                         \
     })
 
-#define DEBUG 
+#undef DEBUG 
 
 #ifdef DEBUG
 #define LOG(FMT, ...) Rprintf("%s: "  FMT " @%s:%d\n",   \
@@ -31,15 +31,8 @@
 
 #define assert_type(x, type) assert_type3(x, type, __func__)
 #define assert_type3(x, type, where) assert_type5(x, type, where, __FILE__, __LINE__)
-
-inline void assert_type5(SEXP x, SEXPTYPE type, const char *where,
-                         const char *file, int line) {
-  if (TYPEOF(x) != type) {
-    error("Expected %s in %s, got %s (%s:%d)",
-          type2char(type), where, type2char(TYPEOF(x)), file, line);
-  }
-}
-
+void assert_type5(SEXP x, SEXPTYPE type, const char *where, const char *file, int line);
 const char *decode_return_code(int);
 
 #endif
+

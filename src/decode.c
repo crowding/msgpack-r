@@ -39,6 +39,7 @@ SEXPTYPE type_to_sexptype(int t);
 
 const char *decode_item_type(cwpack_item_types);
 
+/* used to make WARN_ONCE work: once per call */
 static long calls = 0;
 
 int isNA (SEXP item) {
@@ -52,8 +53,7 @@ SEXP _unpack_opts(SEXP dict,
                   SEXP package,
                   SEXP max_size,
                   SEXP max_depth,
-                  SEXP underflow_handler,
-                  SEXP buf) {
+                  SEXP underflow_handler) {
   SEXP optsxp = PROTECT(allocVector(RAWSXP, sizeof(unpack_opts)));
   unpack_opts *opts = (unpack_opts*)(RAW(optsxp));
   opts->use_df = asLogical(use_df);
@@ -62,32 +62,34 @@ SEXP _unpack_opts(SEXP dict,
   opts->package = package;
 
   opts->underflow_handler = underflow_handler;
-  opts->buf = buf; /* TODO: But who holds this reference? Can't use
-                      protect_with_index if I'm returning to R. I'm
-                      just leaning on the R side of the package to
-                      hold this reference. */
+  opts->buf = R_NilValue; /* the buf field is not filled out
+                             here. Whoever fills it out is responsible
+                             for managing protection. */
+  opts->buf_index = -1;
   if (isNA(max_size)) opts->max_pending = ULONG_MAX;
   else opts->max_pending = asReal(max_size);
   if (isNA(max_depth)) opts->max_depth = UINT_MAX;
   else opts->max_depth = asInteger(max_depth);
 
-  /* To make sure that R does not finalize the objects pointed to by
-     this struct, hang the object references off of it.
+  /* To make sure that R does not finalize the objects I'm using in
+     also hang the object references off of it.
      
-     TODO: change this to be the R External Pointer mechanism instead? */
+     The buffer decide buffer is handled in init_unpack_context. */
+  SEXP refs = PROTECT(CONS(dict,
+                           CONS(package,
+                                CONS(underflow_handler,
+                                     R_NilValue))));
   setAttrib(optsxp,
             install("refs"),
-            CONS(dict,
-                 CONS(package,
-                      CONS(underflow_handler,
-                           R_NilValue))));
-  UNPROTECT(1);
+            refs);
+  UNPROTECT(2);
   return optsxp;
 }
 
 
 int init_unpack_context(cw_unpack_context *cxt,
                         SEXP optsxp,
+                        SEXP buf,
                         unsigned long start,
                         unsigned long end) {
   assert_type(optsxp, RAWSXP);
@@ -96,10 +98,6 @@ int init_unpack_context(cw_unpack_context *cxt,
   unpack_opts *opts = (unpack_opts *)RAW(optsxp);
   opts->depth = 0;
   opts->pending = 0;
-
-  SEXP buf = opts->buf;
-  assert_type(buf, RAWSXP);
-  ASSERT(start <= LENGTH(buf));
 
   unpack_underflow_handler huu;
   if (opts->underflow_handler != R_NilValue) {
@@ -110,21 +108,36 @@ int init_unpack_context(cw_unpack_context *cxt,
 
   int r = cw_unpack_context_init(cxt, RAW(buf) + start, end - start, huu);
   if (r)
-    error("Could not initiaize cw_unpack, %s", decode_return_code(r));
+    error("Could not initialize cw_unpack, %s", decode_return_code(r));
 
   cxt->opts = opts;
-  return 0;
+
+  /* Here is where we start holding a reference to the
+     buffer... needss to be released on returning to R */
+  if (cxt->opts->buf_index != -1) {
+    LOGD("optsxp previously held a buffer iwth protextion index %d",
+         cxt->opts->buf_index);
+  }
+  PROTECT_WITH_INDEX(cxt->opts->buf = buf, &(cxt->opts->buf_index));
+  LOGD("First buffer is, ( 0x%x[%d:%d][%d] )",
+       RAW(cxt->opts->buf),
+       cxt->start - RAW(cxt->opts->buf),
+       cxt->end - RAW(cxt->opts->buf),
+       cxt->current - RAW(cxt->opts->buf));
+  LOGD("buffer protected at index %d", cxt->opts->buf_index);
+  
+  return 1;
 }
 
 
 
-SEXP _unpack_msg(SEXP optsxp) {
+SEXP _unpack_msg(SEXP buf, SEXP optsxp) {
   calls++;
-  unpack_opts *opts = (unpack_opts *)(RAW(optsxp)); 
   cw_unpack_context cxt;
-  int protections = init_unpack_context(&cxt, optsxp, 0, LENGTH(opts->buf));
+  int protections = init_unpack_context(&cxt, optsxp, buf, 0, LENGTH(buf));
   LOG("depth = %u, pending = %lu", cxt.opts->depth, cxt.opts->pending); 
-  SEXP out = extract_sexp(&cxt);
+  SEXP out = PROTECT(extract_sexp(&cxt));
+  protections++;
   LOG("depth = %u, pending = %lu", cxt.opts->depth, cxt.opts->pending); 
   ASSERT(cxt.opts->depth == 0);
   ASSERT(cxt.opts->pending == 0);
@@ -136,14 +149,17 @@ SEXP _unpack_msg(SEXP optsxp) {
 int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
   unsigned long need = x - ((cxt->end - cxt->current) / sizeof(*(cxt->end)));
   /* bounce back to R to read X bytes */
+
   if (cxt->opts->underflow_handler != R_NilValue) {
     unsigned long had = 0;
     while(TRUE) {
       assert_type(cxt->opts->underflow_handler, CLOSXP);
       LOGD("Asking R to read %d bytes", need - had);
+      SEXP scurrent = PROTECT(ScalarInteger(cxt->current - RAW(cxt->opts->buf)));
+      SEXP sneed = PROTECT(ScalarInteger(need - had));
       SEXP call = PROTECT(lang3(cxt->opts->underflow_handler,
-                                ScalarInteger(cxt->current - RAW(cxt->opts->buf)),
-                                ScalarInteger(need - had)));
+                                scurrent,
+                                sneed));
       /* result should be a list( rawsxp, start, end, current ) */
       SEXP result = PROTECT(eval(call, cxt->opts->package));
       assert_type(result, VECSXP);
@@ -162,21 +178,22 @@ int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
              cxt->current - RAW(cxt->opts->buf),
              RAW(buf), start, end, current);
 
-        cxt->opts->buf = buf;
+        ASSERT(cxt->opts->buf_index != -1);
+        REPROTECT(cxt->opts->buf = buf, cxt->opts->buf_index);
         cxt->start = RAW(buf) + start;
         cxt->end = RAW(buf) + end;
         cxt->current = RAW(buf) + current;
-        UNPROTECT(2);
+        UNPROTECT(4);
         return CWP_RC_OK;
       } else if (have > had) {
         LOGD("Not enough new data read, have %d, need %d", have, need);
         /* try again */
         had = have;
-        UNPROTECT(2);
+        UNPROTECT(4);
       } else {
         LOGD("No new data read");
         /* give up */
-        UNPROTECT(2);
+        UNPROTECT(4);
         return CWP_RC_END_OF_INPUT;        
       }
     }
@@ -188,20 +205,18 @@ int handle_unpack_underflow(cw_unpack_context *cxt, unsigned long x) {
 
 
 
-SEXP _unpack_msg_partial(SEXP startx, SEXP endx, SEXP optsxp) {
+SEXP _unpack_msg_partial(SEXP buf, SEXP startx, SEXP endx, SEXP optsxp) {
   /* Note that this must be able to cope with underflow handlers. */
-  /* count calls to see that callbacks are functioning... */
-  calls++;
+  calls++; /* reset WARN_ONCE */
 
   cw_unpack_context cxt;
   assert_type(optsxp, RAWSXP);
   
-  unpack_opts *opts = (unpack_opts *)RAW(optsxp);
   unsigned long start = asInteger(startx);
   unsigned long end = asInteger(endx);
-  int protections = init_unpack_context(&cxt, optsxp, start, end);
+  int protections = init_unpack_context(&cxt, optsxp, buf, start, end);
   LOG("Before: buf = 0x%x[%d:%d][%d], status = '%s'",
-      RAW(opts->buf),
+      RAW(cxt.opts->buf),
       cxt.start - RAW(cxt.opts->buf),
       cxt.end - RAW(cxt.opts->buf),
       cxt.current - RAW(cxt.opts->buf),
@@ -211,7 +226,7 @@ SEXP _unpack_msg_partial(SEXP startx, SEXP endx, SEXP optsxp) {
   protections++;
 
   LOG("After:  buf = 0x%x[%d:%d][%d], status = '%s'",
-      RAW(opts->buf),
+      RAW(cxt.opts->buf),
       cxt.start - RAW(cxt.opts->buf),
       cxt.end - RAW(cxt.opts->buf),
       cxt.current - RAW(cxt.opts->buf),
@@ -578,11 +593,12 @@ SEXP fill_vector(cw_unpack_context *cxt, SEXP buf, uint32_t len,
 
   if (output_data_frame) {
     LOGD("Making a data frame");
-    SEXP call = PROTECT(lang2(install(".set_row_names"), ScalarInteger(df_rows)));
+    SEXP nrows = PROTECT(ScalarInteger(df_rows));
+    SEXP call = PROTECT(lang2(install(".set_row_names"), nrows));
     SEXP rn = PROTECT(eval(call, R_BaseEnv));
     setAttrib(buf, R_RowNamesSymbol, rn);
     setAttrib(buf, R_ClassSymbol, ScalarString(mkChar("data.frame")));
-    UNPROTECT(2);
+    UNPROTECT(3);
   }
 
   LOGD("Returning a %s", type2char(TYPEOF(buf)));

@@ -110,8 +110,8 @@ catenator <- function(val=c()) {
              } else val[c()]
            },
 
-           apply = {
-             x
+           buf = {
+             val
            },
 
            start = start,
@@ -308,14 +308,14 @@ readRaw.connection <- function(con, n) {
   tryCatch({
     readBin(con, 'raw', n)
   },
-  error=function(e) {
-    warning("Ignoring ", e)
+  error = function(e) {
+    # warning("Ignoring ", e)
     raw(0)
   })
 }
 
 writeRaw.connection <- function(object, con, ...) {
-    writeBin(object, con, ...)
+  writeBin(object, con, ...)
 }
 
 

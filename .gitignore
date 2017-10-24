@@ -3,3 +3,4 @@
 .RData
 *.so
 *.o
+*.bc

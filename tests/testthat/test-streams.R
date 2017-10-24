@@ -230,9 +230,21 @@ test_that("seek method", {
   attr(x, as.character(substitute(name)))
 }
 
-test_that("large blob under gctorture", {
+test_that("large blob to force GC?", {
+  data <- sample(as.raw(0:255), 0x2000000, TRUE)
+  con <- msgConnection(rawConnection(raw(0), open="wb"))
+  packet <- packMsg(data)
+  writeMsg(data, con)
+  bytes <- rawConnectionValue(con)
+  close(con)
+  con2 <- msgConnection(rawConnection(bytes, open="rb"))
+  as.read <<- readMsg(con2)
+  close(con2)
+  expect_identical(as.read, data)
+})
 
-  data <- sample(as.raw(0:255), 0x1000000, TRUE)
+test_that("smallish blob under gctorture", {
+  data <- sample(as.raw(0:255), 0x30000, TRUE)
   con <- msgConnection(rawConnection(raw(0), open="wb"))
   packet <- packMsg(data)
   writeMsg(data, con)
@@ -252,17 +264,7 @@ test_that("large blob under gctorture", {
   })
   close(con2)
   expect_identical(as.read, data)
-
 })
-
-
-
-## When I single stepped through, what I got was this:
-
-## handle_unpack_underflow:  Swapping buffers, ( 0x80005228[0:65536][5] -> 0x263fe028[0:16777221][5] ) @decode.c:163
-## make_sexp_from_context:  Making sexp from a binary @decode.c:269
-## _unpack_msg_partial: After:  buf = 0x263fe028[0:16777221][16777221], status = 'ok' @decode.c:218
-
 
 
 # I'd like to have some tests with reading/writing to a separate

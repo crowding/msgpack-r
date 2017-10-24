@@ -41,8 +41,9 @@ SEXP _pack_opts(SEXP compatible,
 
   opts->package = package;
   /* also hang onto explicit refs for the SEXP values*/
-  setAttrib(optsxp, install("refs"), CONS(package, R_NilValue));
-  UNPROTECT(1);
+  SEXP pkg = PROTECT(CONS(package, R_NilValue));
+  setAttrib(optsxp, install("refs"), pkg);
+  UNPROTECT(2);
   return optsxp;
 }
 
@@ -51,7 +52,7 @@ int init_pack_context(cw_pack_context *cxt, SEXP opts) {
   ASSERT(TYPEOF(opts) == RAWSXP && LENGTH(opts) == sizeof(pack_opts));
   cxt->opts = (pack_opts *) RAW(opts);
   
-  /* allocate a buffer */
+  /* allocate a buffer and protect it. This is unprotected by caller */
   PROTECT_WITH_INDEX(cxt->opts->buf = allocVector(RAWSXP, cxt->opts->buf_size),
                      &cxt->opts->buf_index);
   cw_pack_context_init(cxt,
@@ -59,8 +60,7 @@ int init_pack_context(cw_pack_context *cxt, SEXP opts) {
                        LENGTH(cxt->opts->buf),
                        &handle_overflow);
   cw_pack_set_compatibility(cxt, cxt->opts->compatible);
-
-  return 1;
+  return 1;                     /* return protections */
 }
 
             
@@ -74,8 +74,8 @@ SEXP _pack_msg(SEXP input, SEXP opts) {
   if (cxt.return_code != CWP_RC_OK) {
     error("%s", decode_return_code(cxt.return_code));
   }
-
-  SETLENGTH(cxt.opts->buf, (cxt.current - cxt.start) / sizeof(Rbyte));
+  unsigned long newlength = (cxt.current - cxt.start) / sizeof(Rbyte);
+  SETLENGTH(cxt.opts->buf, newlength);
   UNPROTECT(protections);
   return cxt.opts->buf;
 }
@@ -101,7 +101,9 @@ int handle_overflow(cw_pack_context *cxt, unsigned long more) {
       newlen);
 
   REPROTECT(cxt->opts->buf =
-              copy_to_new_raw(cxt->opts->buf, newlen, LENGTH(cxt->opts->buf)),
+              copy_to_new_raw(cxt->opts->buf,
+                              newlen,
+                              LENGTH(cxt->opts->buf)),
             cxt->opts->buf_index);
   
   // update the context structure to point to the new buf

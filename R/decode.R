@@ -36,11 +36,11 @@
 #' unpackMsg(msg)
 #' @export
 unpackMsg <- function(x, ...) {
-  .Call("_unpack_msg", unpackOpts(..., x=x))
+  .Call("_unpack_msg", x, unpackOpts(...))
 }
 
-#dbg <- alist
-dbg <- cat
+dbg <- alist
+#dbg <- cat
 
 #' Extract a number of msgpack messages from a raw object.
 #'
@@ -60,7 +60,7 @@ dbg <- cat
 #' unpackMsgs(x, 2)
 #' @rdname unpackMsg
 #' @export
-unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
+unpackMsgs <- function(x, n = NA, reader = NULL, ...) {
   if (is.na(n)) {
     n <- .Machine$integer.max
   }
@@ -73,8 +73,7 @@ unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
   status <- "ok"
 
   readMore <- function(current, desired) {
-    dbg("readMore:", "current =", current, "\n")
-    dbg("readMore:", "desired =", desired, "\n")
+    dbg("readMore:", "current =", current, "desired =", desired, "\n")
     start <- saveData(action="start")
     saveData(reader(desired))
     new_start <- saveData(action="start")
@@ -84,14 +83,18 @@ unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
     result
   }
 
-  opts = unpackOpts(..., x = x,
+  opts = unpackOpts(...,
                     underflow_handler = if (is.null(reader)) NULL else readMore)
 
   # cat("buffer: "); print(saveData(action="contents"))
   tryCatch(
     while(saveMessage(action="length") < n) {
       last_start <- saveData(action="start")
-      result <- .Call("_unpack_msg_partial", offset, saveData(action="end"), opts)
+      result <- .Call("_unpack_msg_partial",
+                      saveData(action="buf"),
+                      offset,
+                      saveData(action="end"),
+                      opts)
       ## result is a pairlist( message, status, new_offset )
       # cat("unpack result: "); print(result)
       status <- result[[1]]
@@ -103,18 +106,17 @@ unpackMsgs <- function(x, n=NA, reader = NULL, ...) {
         bread <- bread + message_length
         saveData(message_length, action="drop")
         offset <- result[[3]]
-        # cat("after 1 msg, buffer: "); print(saveData(action="contents"))
+        # dbg("after 1 msg, buffer: "); print(saveData(action="contents"))
       } else {
         stop(status)
       }
     },
     error = function(e) {
-      cat("exception: ")
-      str(e)
+      dbg("Stopping with exception: ", e$message, "in", deparse(e$call), "\n")
       status <<- e$message
     }
   )
-  # cat("after failure, buffer: "); print(saveData(action="contents"))
+  # dbg("after failure, buffer: "); print(saveData(action="contents"))
 
   list(msgs = saveMessage(action="read"),
        remaining = saveData(action="read"),
@@ -143,8 +145,7 @@ unpackOpts <- function(parent = NULL,
                        simplify = TRUE,
                        max_size = NA,
                        max_depth = NA,
-                       underflow_handler = NULL,
-                       x = raw(0)) {
+                       underflow_handler = NULL) {
   .Call("_unpack_opts",
         parent,
         df,
@@ -152,8 +153,7 @@ unpackOpts <- function(parent = NULL,
         parent.env(environment()),
         max_size,
         max_depth,
-        underflow_handler,
-        x);
+        underflow_handler);
 }
 
 # Come up with a name when a non-string is used as key.

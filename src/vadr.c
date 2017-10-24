@@ -2,6 +2,14 @@
 #include "cwpack.h"
 #include <R_ext/Rdynload.h>
 
+void assert_type5(SEXP x, SEXPTYPE type, const char *where,
+                         const char *file, int line) {
+  if (TYPEOF(x) != type) {
+    error("Expected %s in %s, got %s (%s:%d)",
+          type2char(type), where, type2char(TYPEOF(x)), file, line);
+  }
+}
+
 const char *decode_return_code(int x) {
   switch(x) {
   case CWP_RC_OK: return "ok";
