@@ -1,8 +1,23 @@
+## ----- setup
 library(purrr)
 library(dplyr)
 library(magrittr)
 library(tibble)
+library(msgpack)
 
+## ---- dataset
+library(nycflights13)
+dataset <- as.list(as.environment("package:nycflights13"))
+
+subsample <- function(dataset, rate) {
+  lapply(dataset, function(df) {
+    df[1:(1 + round(nrow(df) * rate)), ]
+  })
+}
+
+onerow <- subsample(dataset, 0)
+
+## ---- definition
 attach_env <- function(arg_, ...) {
   target <- new.env(parent = env(arg_))
   for (i in list(...)) {
@@ -94,8 +109,8 @@ bytes <- function(x) {
 
 timeConvert <- function(data,
                         from = unserialize,
-                        to =  function(data) serialize(data,NULL),
-                        wrap = identity) {
+                        to = function(data) serialize(data,NULL),
+                        wrap = identity, ...) {
   force(data)
   start.write <- proc.time()
   enc <- to(data)
@@ -109,8 +124,18 @@ timeConvert <- function(data,
 }
 
 
-timeRawConnection <- function(data, reader=unserialize, writer=serialize,
-                              wrap = identity) {
+timeConnection <- function(..., raw = TRUE) {
+  if (raw) {
+    timeRawConnection(...)
+  } else {
+    timeTextConnection(...)
+  }
+}
+
+timeRawConnection <- function(data,
+                              reader = unserialize,
+                              writer = serialize,
+                              wrap = identity, ...) {
   force(data)
   conn <- wrap(rawConnection(raw(0), open="wb"))
   on.exit(close(conn), add=TRUE)
@@ -131,8 +156,8 @@ timeRawConnection <- function(data, reader=unserialize, writer=serialize,
 timeTextConnection <- function(data,
                                reader = function(x) source(x, TRUE),
                                writer = function(x, conn) dump("x", conn),
-                               wrap = identity) {
-  force(data)        
+                               wrap = identity, ...) {
+  force(data)
   theText <- character(0)
   conn <- textConnection(NULL, open="w")
   on.exit(close(conn), add=TRUE)
@@ -140,7 +165,7 @@ timeTextConnection <- function(data,
   writer(data, conn)
   end.write <- proc.time()
   theText <- textConnectionValue(conn)
-  nbytes <- sum(nchar(theText)) + length(theText) #count linebreaks as a byte
+  nbytes <- bytes(theText)
   conn2 <- wrap(textConnection(theText, open="r"))
   on.exit(close(conn2), add=TRUE)
   start.read <- proc.time()
@@ -151,10 +176,13 @@ timeTextConnection <- function(data,
         nbytes, as.read)
 }
 
-timeFileIO <- function(data, reader=unserialize, writer=serialize, raw=TRUE, wrap = identity) {
+timeFileIO <- function(data,
+                       reader = unserialize,
+                       writer = serialize,
+                       raw = TRUE,
+                       wrap = identity, ...) {
   force(data)
   fnam <- tempfile()
-  cat(fnam, "\n")
   on.exit(unlink(fnam, force=TRUE))
   con <- file(fnam, open=paste0("w", if(raw) "b" else ""), raw=raw)
   start.write <- proc.time()
@@ -173,11 +201,15 @@ timeFileIO <- function(data, reader=unserialize, writer=serialize, raw=TRUE, wra
 }
 
 port <- 42170
-timeSocketTransfer <- function(data, reader = unserialize, writer = serialize,
-                               wrap = identity, raw = TRUE) {
+timeSocketTransfer <- function(data,
+                               reader = unserialize,
+                               writer = serialize,
+                               wrap = identity,
+                               raw = TRUE, ...) {
   force(data)
   doRead <- function(other) {
-    conn <- wrap(socketConnection(port = port, server=TRUE,
+    conn <- wrap(socketConnection(port = port,
+                                  server = TRUE,
                                   blocking = TRUE,
                                   open = paste0("r", if(raw) "b" else "")))
     on.exit(close(conn))
@@ -189,7 +221,7 @@ timeSocketTransfer <- function(data, reader = unserialize, writer = serialize,
          result = as.read)
   }
   doWrite <- function(other) {
-    conn <- wrap(socketConnection(port = port, server=FALSE,
+    conn <- wrap(socketConnection(port = port, server = FALSE,
                                   blocking = TRUE,
                                   open = paste0("w", if(raw) "b" else "")))
     start.write <- proc.time()
@@ -212,11 +244,10 @@ timeSocketTransfer <- function(data, reader = unserialize, writer = serialize,
 timeFifoTransfer <- function(data,
                              reader = unserialize,
                              writer = serialize,
-                             wrap = identity) {
+                             wrap = identity, ...) {
   force(data)
   fnam <- tempfile()
   on.exit(unlink(fnam, force = TRUE))
-  cat(fnam, "\n")
   system(paste("mkfifo", fnam))
 
   doRead <- function(other) {
@@ -256,18 +287,19 @@ timeFifoTransfer <- function(data,
           quote=TRUE)
 }
 
-timeCurve <- function(dataset, method, reader, writer,
+timeCurve <- function(dataset,
+                      method,
                       timeout = 60,
                       start = 0.01,
-                      max = 1,
-                      wrap = identity
+                      max = 1, ...
                       ) {
   results <- data_frame()
   current <- start
+  cat("size = ", current, "\n")
   while (current <= max) {
-    print(c(current=current))
-    data <- subsample(dataset,current)
-    result <- method(data, reader, writer, wrap = wrap)
+    cat("size = ", current, "\n")
+    data <- subsample(dataset, current)
+    result <- method(data, ...)
     results <- bind_rows(results, as_tibble(c(size = current, result)))
     if ("total.elapsed" %in% names(result)) {
       if (result$total.elapsed > timeout) break() else NULL
@@ -285,12 +317,12 @@ timeCurve <- function(dataset, method, reader, writer,
 quote(
     tests <- list(
         strategy = list(
-            convert = timeConvert
-          , connection = timeRawConnection
-            ## , file = timeFileIO
-            ## , fifo = timeFifoTransfer
-            ## , socket = timeSocketTransfer
-            ## , wire = timeWireTransfer
+          ,  convert = timeConvert
+          ,  connection = timeRawConnection
+          ,  file = timeFileIO
+          ,  fifo = timeFifoTransfer
+          ,  socket = timeSocketTransfer
+          ,  wire = timeWireTransfer
         ),
         encoder = list(
             serialize = list(
@@ -308,11 +340,13 @@ quote(
           , RJSONIO = list(
                 RJSONIO::fromJSON,
                 RJSONIO::toJSON))
-      , dataset = list(nycflights13=dataset))
+      , dataset = list(nycflights13=list(dataset)))
 )
 
 
 arg_df <- function(tests) (tests
+  # produces an arg data frame: the labels in columns and the argument
+  # data structure in column "args"
   %>% map(names)
   %>% cross_df()
   %>% pmap_dfr(function(...) {
@@ -321,27 +355,106 @@ arg_df <- function(tests) (tests
                     function(label, column) list(tests[[column]][[label]]))
     c(labels, args = list(list(arglist)))
   })
+  %>% mutate(args = (args # unlist the args twice
+    %>% map(.
+            %>% unlist(recursive = FALSE, use.names = FALSE)
+            %>% unlist(recursive = FALSE, use.names = TRUE))))
 )
+
 
 `%+%` <- union
 `%-%` <- setdiff
+`%*%` <- intersect
+# `%/%` <- dusjunctive union ???
 
-run_tests <- function(arg_df, names) {
-  results <- (arg_df
-    %>% pmap_dfc(function(l) {
-      c(l, do.call(l$bench, l$args, environment()))
-    })
-  )
+run_tests <- function(arg_df) (arg_df
+  %>% pmap_dfr(function(..., args) {
+    labels <- list(...)
+    print(unlist(labels))
+    # what I want here is a bind syntax like
+    ## bind({
+    ##   list(strategy = ?fun, ??args) <- args
+    ##   fun(!!args)
+    ## })
+    fun <- args$strategy
+    args <- args[names(args) != "strategy"]
+    results <- do.call(fun, args, quote = TRUE, envir = environment())
+    as_data_frame(c(labels, results))
+  })
+)
 
-  keys <- names(arg_df) %-% "args"
-
-  #update benchmarks
-  (benchmarks
-      %>% anti_join(results, by=keys)
-      %>% bind_rows(results)
-  ) ->> benchmarks
+benchmarks <- data.frame()
+store <- function(data) {
+  # key on all character columns the two tables hav in common
+  existing.keys <- names(benchmarks)[map_lgl(benchmarks, is.character)]
+  new.keys <- names(data)[map_lgl(data, is.character)]
+  keys <- existing.keys %*% new.keys
+  message(paste("Replacing on keys:", paste0("\"", keys, "\"", collapse=", ")))
+  if (length(keys) > 0) {
+    benchmarks <<- (benchmarks          # update benchmarks
+      %>% anti_join(data, by=keys)
+      %>% bind_rows(data)
+    )
+  } else {
+    benchmarks <<- data
+  }
+  data
 }
 
-bench <- function(dataset, strategy, ...) {
-  stategy(dataset, ...)
+common.options <- list(
+  strategy = list(
+    timeCurve = list(strategy = timeCurve, timeout = 10, start = 0.001)),
+  dataset = list(
+    nycflights13 = list(data = dataset)))
+
+conversion.methods <- list(
+  method = list(
+    convert = list(method = timeConvert))
+)
+
+connection.methods <- list(
+  method = list(
+    conn = list(method = timeConnection),
+    file = list(method = timeFileIO),
+    fifo = list(method = timeFifoTransfer),
+    socket = list(method = timeSocketTransfer))
+)
+
+convert.common.options <- c(
+  common.options,
+  conversion.methods
+)
+
+raw.common.options <- c(
+  common.options,
+  conversion.methods,
+  etc = list(raw = list(raw = TRUE))
+)
+
+text.common.options <- c(
+  common.options,
+  conversion.methods,
+  etc = list(raw = list(raw = FALSE))
+)
+
+all.common.options <- c(
+  common.options,
+  list(
+    method = c(connection.methods$method,
+               conversion.methods$method))
+)
+
+`%but%` <- function(l, r) {
+  l[names(r)] <- r
+  l
 }
+
+## list(x = ?first, ??rest) -> list()
+
+## f <- function(a, call) bind({
+##   list(?first, ??rest) <- callList
+## })
+
+## Local Variables:
+## ess-r-package-info: ("msgpack" . "~/msgpack/")
+## End:

@@ -59,38 +59,34 @@ master process afterwards.
 
 The implementation of the benchmarking code is in file `benchmarks.R`.
 
-```{R external-code, cache=FALSE}
-read_chunk('benchmarking.R')
+```{R cache=FALSE}
+read_chunk('benchmarking.R', labels = "setup")
+opts_chunk$set(cache=TRUE, autodep=TRUE, message = FALSE, warning = FALSE)
 ```
+As a test dataset we'll use `nycflights13`. Since the packages vary so
+much in performance, we'll have to dynamically vary the input size. So
+the function `subsample` produces an artificially shrunk or enlarged
+version of the dataset according to the argument `rate`.
 
-Here's the test dataset we will use, one of the larger data packages
-available on CRAN.
-
-```{R}
-library(nycflights13)
-
-dataset <- as.list(as.environment("package:nycflights13"))
-timings <- list()
-
-subsample <- function(dataset, rate) {
-    lapply(dataset, function(df) {
-        df[1:(1 + round(nrow(df) * rate)), ]
-    })
-}
-
-onerow <- subsample(dataset, 0)
+```{R cache=FALSE}
+read_chunk('benchmarking.R', labels = "dataset")
 ```
 
 We have several different timing scenarios:
 
 * `convert` is converting object to an R `raw()` and back.
-* `connection` is also an in-memory conversion but using R
-      textConnection or rawConnection objects.
+* `con` is also an in-memory conversion but using R
+      `textConnection` or `rawConnection` objects.
 * `file` writes to a temp file and then reads it back.
 * `fifo` forks the R process and writes from one while reading
       from the other.
 * `tcp` forks the R process and writes from one to the other using a
-      TCP socket.
+      TCP socket (on the same machine)
+* `net` (TODO) sends the encoded text to another R process to decode.
+
+```{R cache = FALSE}
+read_chunk('benchmarking.R', labels = "definitions")
+```
 
 Each returns the OS-reported load for the process, elapsed time for
 reading, writing and total. For `fifo` and `tcp` tests, the reading
@@ -106,7 +102,7 @@ good candidate for communicating between R processes.
 
 For instance:
 
-```{R cache=TRUE}
+```{R}
 unlist(timeConvert(dataset, unserialize, function(data) serialize(data, NULL)))
 ```
 
@@ -165,128 +161,139 @@ timeRawConnection(
 ) %>% unlist
 ```
 
+(TODO: This ought to be faster.)
+
+Now let's start collecting benchmarks systematically.
+
+```{R}
+serialize.results <- run_tests(arg_df(c(
+  all.common.options,
+  list(
+    note = list("using readAll on connections" = list()),
+    encoder = list(
+      serialize = list(
+        reader = function(c) unserialize(readAll(c)),
+        writer = serialize,
+        from = unserialize,
+        to = function(data) serialize(data, NULL)))))))
+```
+```{R}
+store(serialize.results)
+```
+
 ## Dput/source
 
-The `dput` and `deparse` render R data objects to an ASCII
-connection in R syntax. The mechanism for reading objects back in is
-to `eval` or `source` the text.
+The `dput` and `deparse` render R data objects to an ASCII connection
+in R-like syntax.  THe idea is that the dext output "looks like" the
+code it takes to construct the object, to the extent that the
+mechanism for reading objects back in is to `eval` or `source` the
+text. (Hopefully one does not do this with untrusted data. A better
+technique may be to evaluate the data in a limited environment that
+just contains the needed constructors like `structure`, `list` and `c`
+etc.)
 
-    dput(list(1, "2", verb=quote(buckle), my=c("s", "h", "o", "e")))
+```{R}
+## Annoyingly, the behavior of "dump" and "dput" depend on this global option.
+options(deparse.max.lines = NULL)
+
+deparse(control=c(),
+        list(1, "2", verb=quote(buckle), my=c("s", "h", "o", "e")) )
+```
 
 Performance-wise, `dput` and `source` should not be used for large
 datasets, because they display an O(n^2) characteristic in terms of
-the data size:
+the data size.
 
 ```{R}
 library(ggplot2)
-## Annoyingly, the behavior of "dump" and "dput" depend on this global option.
-options(deparse.max.lines = NULL)
 
 deparse.curve <- timeCurve(dataset, timeConvert, deparse, function(t) eval(parse(text=t)))
 ```
 
 ```{R}
-dataset <- rbind.fill(dataset, deparse.curve)
 ggplot(deparse.curve) + aes(x=size, y=total.elapsed) + geom_line()
+```
+
+```{R}
+options(deparse.max.lines = NULL)
+dput.timings <- run_tests(arg_df(c(
+  all.common.options,
+  list(
+    encoder = list(
+      dput = list(
+        from = function(t) eval(parse(text=t)),
+        to = deparse,
+        reader = function(c) eval(parse(c)),
+        writer = function(x, c) dput(x, file=c)))))))
+```
+
+```{R}
+store(dput.timings)
 ```
 
 ## jsonlite
 
-```{R, cache=TRUE}
-library(jsonlite)
-
-json <- timeCurve(dataset, timeConvert, fromJSON, toJSON)
-```
-
-jsonlite performs reasonably well, but is about N times slower than
-serializing.
-
 ```{R}
-dataset <- rbind.fill(dataset, json)
-ggplot(json) + aes(x=size, y=total.elapsed) + geom_line()
-
-```
-`jsonlite` supports reading to or writing from connections, but only
-to transmit one data frame at a time.
-
-```{R}
+# `jsonlite` supports streaming reads but only of one data frame at a time, so...
 jsonlite_reader <- function(conn) {
   append <- msgpack:::catenator()
   stream_in(conn, handler = function(x) append(list(x)))
   append(action="read")
 }
 
-jsonlite_writer <- function(data, conn) {
-  lapply(data, stream_out, conn)
+jsonlite_writer <- function(l, conn) {
+  lapply(l, stream_out, conn)
 }
 
-json <- timeCurve(dataset, timeConvert, fromJSON, toJSON)
-timeSocketTransfer(dataset, reader=jsonlite_reader, writer=jsonlite_writer)
+jsonlite.timings <- run_tests(arg_df(c(
+  convert.common.options,
+  list(
+    encoder = list(
+      jsonlite = list(
+        to = jsonlite::toJSON,
+        from = jsonlite::fromJSON,
+        reader = jsonlite_reader,
+        writer = jsonlite_writer))))))
 ```
+
+jsonlite performs reasonably well, but is `{R} "several"` times slower than
+serializing.
 
 ```{R}
-
-ggplot(json) + aes(x=size, y=total.elapsed) + geom_line()
+store(jsonlite.timings)
 ```
-
 
 # Msgpack
 
-Now `msgpack` appears to have some streaming issues with especially large messages.
+Msgpack is quite zippy but has some troubling quadratic behavior...
 
 ```{R cache = TRUE}
-library(msgpack)
+msgpack.timings <- run_tests(arg_df(c(
+  all.common.options,
+  list(
+    encoder = list(
+      msgpack = list(
+        wrap = msgConnection,
+        reader = msgpack::readMsg,
+        writer = msgpack::writeMsg,
+        to = msgpack::packMsg,
+        from = msgpack::unpackMsg))))))
+```
 
-timeConvert(dataset, unpackMsg, packMsg)
-
-## note that msgpack requires a wrapper over the raw connection in order
-## to pull off partial reads.
-msgpack.raw <- timeCurve(dataset,
-                         start=0.001,
-                         method = timeConvert,
-                         timeout = 5,
-                         reader = unpackMsg,
-                         writer = packMsg,
-                         wrap = msgConnection)
-
-ggplot(msgpack.raw) + aes(x=size, y=total.elapsed) + geom_line()
-
-msgpack.rawconn <- timeCurve(dataset,
-                             start=0.01,
-                             method = timeRawConnection,
-                             reader = readMsg,
-                             writer = writeMsg,
-                             wrap = msgConnection,
-                             timeout = 10)
-
-ggplot(msgpack.rawconn) + aes(x=size, y=total.elapsed) + geom_line()
+```{R}
+store(msgpack.timings)
 ```
 
 Implementing callbacks has helped a lot, but there is still an O(N^2)
 characteristic going on here. Need to profile where it is allocating
 its memory.
 
-```{R cache = TRUE}
-
-msgpack.socket <- timeCurve(dataset,
-                            start=0.001,
-                            method = timeFifoTransfer,
-                            reader = readMsg,
-                            writer = writeMsg,
-                            wrap = msgConnection, timeout=10)
-
-timeRawConnection(dataset, writer = writeMsg, reader = readMsg, wrap = msgConnection)
-timeFileIO(dataset, writer = writeMsg, reader = readMsg, wrap = msgConnection)
-timeFifoTransfer(dataset, writer = writeMsg, reader = readMsg, wrap = msgConnection)
-timeSocketTransfer(dataset, writer = writeMsg, reader = readMsg, wrap = msgConnection)
-```
-
 ## msgpackR
 
 There is an older pure-R implementation of msgpack on CRAN. One quirk is that
-it doesn't handle `NA` in R vectors.
+it doesn't accept `NA` in R vectors.
 
-```{R cache=TRUE}
+```{R}
 msgpackR::pack(c(1, 2, 3))
 msgpackR::pack(c(1, 2, 3, NA))
 ```
@@ -294,18 +301,28 @@ msgpackR::pack(c(1, 2, 3, NA))
 As a workaround I'll substitute out all the NA values in the dataset.
 
 ```{R}
-library(purr)
 dataset_mungenull <- map(dataset, map_dfc,
                          function(col) ifelse(is.na(col), 9999, col))
 ```
 
 Performance-wise, it is mostly linear but quite slow.
 
-
 ```{R cache=TRUE}
-old_msgpack <- timeCurve(dataset_mungenull,
-                         timeConvert, msgpackR::unpack, msgpackR::pack,
-                         start = 0.001)
+msgpackR.timings <- run_tests(arg_df(c(
+  all.common.options %but% list( 
+    note = list("no NAs, readAll" = list()),
+    dataset = list(nycflights13 = list(data = dataset_mungenull))),
+  list(
+    encoder = list(
+      msgpackR = list(
+        from = msgpackR::unpack,
+        to = msgpackR::pack,
+        reader = function(conn) msgpackR::unpack(readAll(conn)),
+        writer = function(data, conn) writeBin(msgpackR::pack(data), conn)))))))
+```
+
+```{R}
+store(msgpackR.timings)
 ```
 
 ```{R cache=TRUE}
@@ -314,27 +331,44 @@ ggplot(old_msgpack) + aes(x=size, y=total.elapsed) + geom_line()
 
 ## rjson
 
-rjson is rather zippy -- only ___ times slower than msgpack :)
-
 ```{R cache=TRUE}
-rjson <- timeCurve(dataset,
-                   timeConvert, rjson::fromJSON, rjson::toJSON,
-                   start = 0.001)
+rjson.timings <- run_tests(arg_df(c(
+  convert.common.options,
+  list(
+    encoder = list(
+      rjson = list(
+        from = rjson::fromJSON,
+        to = rjson::toJSON))))))
+```
 
-timeConvert(dataset, rjson::fromJSON, rjson::toJSON)
-timeConvert(dataset, unpackMsg, packMsg)
+rjson is rather zippy -- only `{R "several"}` times slower than msgpack :)
+
+```{R}
+store(rjson.timings)
 ```
 
 ## RJSONIO
-```{R cache=TRUE}
-rjson <- timeCurve(dataset, unpack) 
+
+```{R}
+RJSONIO.timings <- run_tests(arg_df(c(
+  all.common.options,
+  list(
+    encoder = list(
+      RJSONIO = list(
+        from = RJSONIO::fromJSON,
+        to = RJSONIO::toJSON,
+        reader = RJSONIO::readJSONStream,
+        writer = function(x, con)writeBin(RJSONIO::toJSON(x), con),
+        raw = TRUE))))))
 ```
 
-## RJSONIO
+```{R}
+store(RJSONIO.timings)
+```
 
 ```{R cache=TRUE}
-timeCurve(dataset, timeConvert, RJSONIO::fromJSON, RJSONIO::toJSON) 
-timeConvert(dataset, RJSONIO::fromJSON, RJSONIO::toJSON) 
+timeCurve(dataset, timeConvert, RJSONIO::fromJSON, RJSONIO::toJSON)
+timeConvert(dataset, RJSONIO::fromJSON, RJSONIO::toJSON)
 ```
 
 RJSONIO also includes some support for streaming:
@@ -342,9 +376,12 @@ RJSONIO also includes some support for streaming:
 ```{R cache=FALSE}
 x <- RJSONIO::toJSON(dataset)
 
-timeTextConnection(dataset,
-                   RJSONIO::readJSONStream,
-                   function(x, con)write(con, RJSONIO::toJSON(x)))
+y <- RJSONIO::readJSONStream(textConnection(x, open="r"))
+
+# The "read stream" function does not work with textConnections. Odd.
+timeRawConnection(dataset,
+           RJSONIO::readJSONStream,
+           function(x, con)writeBin(RJSONIO::toJSON(x), con))
 ```
 
 Be careful with giant strings of JSON in interactive mode...
@@ -352,23 +389,11 @@ Be careful with giant strings of JSON in interactive mode...
 ## ndjson
 
 ndjson is a "wicked-fast" streaming JSON reader, but not a
-writer.
-
-```{R cache = TRUE}
-library(ndjson)
-
-```
-
-```{R cache = TRUE}
-
-```
+writer. So I will pair it with the fastest other one...
 
 ## write.csv
 
-CSV is ubiquitous if not all that efficient or safe.
+Do we really have to go here? I suppose...
 
-## write.csv
+## XML
 
-CSV is ubiquitous if not all that efficient or safe.
-
-## And collecting all the data
