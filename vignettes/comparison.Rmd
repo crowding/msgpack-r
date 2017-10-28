@@ -1,4 +1,4 @@
-#---
+x#---
 #title: Which Data Format is Fastest Data Format?
 #output: rmarkdown::html_vignette
 #vignette: >
@@ -82,7 +82,7 @@ We'll try several different benchmarking methods:
 * `net` (TODO) launches an R process on a remote machine on the local
   network, sends the data there, then reads a reply.
 
-```{R definitions, cache = FALSE, echo=FALSE}
+```{R definitions, cache = FALSE, echo = FALSE, results = "hide"}
 read_chunk('benchmarking.R')
 ``` 
 
@@ -183,13 +183,13 @@ serialize.blocking <- run_tests(arg_df(c(
     method = list(
       convert = list(method = timeConvert),
       file = list(method = timeFileIO),
-      conn = list(method = timeConnection),
+      conn = list(method = timeConnection)),
     encoder = list(
       serialize = list(
-        reader = function(c) unserialize(readAll(c)),
+        reader = function(c) unserialize(c),
         writer = serialize,
         from = unserialize,
-        to = function(data) serialize(data, NULL))))))))
+        to = function(data) serialize(data, NULL)))))))
 
 serialize.readall <- run_tests(arg_df(c(
   common.options,
@@ -209,9 +209,10 @@ serialize.readall <- run_tests(arg_df(c(
      wonder? ohhh. it's do.call with the big dataset and the traceback... -->
 
 ```{R}
+benchmarks <- data.frame()
 store(serialize.blocking)
 store(serialize.readall)
-```
+ ```
 
 ```{R}
 test.plot <- (ggplot(
@@ -221,13 +222,13 @@ test.plot <- (ggplot(
   + xlab("Data size (nycflights13 = 1)")
   + ylab("Elapsed time (s)")
 )
-test.plot
+test.plot + labs(main="R serialization performance")
 ```
 
 ## Dput/source
 
 The `dput` and `deparse` render R data objects to an ASCII connection
-in R-like syntax.  THe idea is that the dext output "looks like" the
+in R-like syntax.  THe idea is that the text output "looks like" the
 code it takes to construct the object, to the extent that the
 mechanism for reading objects back in is to `eval` or `source` the
 text. (Hopefully one does not do this with untrusted data. A better
@@ -239,9 +240,13 @@ etc.)
 ## Annoyingly, the behavior of "dump" and "dput" depend on this global option.
 options(deparse.max.lines = NULL)
 
-deparse(control=c(),
-        list(1, "2", verb=quote(buckle), my=c("s", "h", "o", "e")))
+dput(control=c(),
+     list(1, "2", verb=quote(buckle), my=c("s", "h", "o", "e")))
 ```
+
+(Note how `dput` fails on transmitting language objects; if we try to
+eval the above we will try to evaluate "buckle" instead of getting
+just the name object.)
 
 Performance-wise, `dput` and `source` should not be used for large
 datasets, because they display an O(n^2) characteristic in terms of
@@ -260,13 +265,13 @@ dput.timings <- run_tests(arg_df(c(
         writer = function(x, c) dput(x, file=c)))))))
 ```
 
-```{R}
-store(dput.timings)
+```{R, results = "hide"}
+benchmarks <- store(dput.timings, benchmarks)
 ```
 
 ```{R}
-(test.plot + labs("dput performance")) %+% filter(benchmarks, encoder == "dput") 
-```
+test.plot + labs(main="dput performance") %+% filter(benchmarks, encoder == "dput")
+ ```
 
 ## jsonlite
 
@@ -296,15 +301,15 @@ jsonlite.timings <- run_tests(arg_df(c(
 jsonlite performs reasonably well, but is about `{R} "several"` times slower than
 serializing.
 
-```{R}
-store(jsonlite.timings)
+```{R, results = "hide"}
+benchmarks <- store(jsonlite.timings, benchmarks)
 ```
 
 ```{R}
-(test.plot + labs("jsonlite performance")) %+% filter(benchmarks, encoder == "jsonlite")
+test.plot + labs(main="jsonlite performance") %+% filter(benchmarks, encoder == "jsonlite")
 ```
 
-# Msgpack
+## Msgpack
 
 Msgpack is quite zippy but has some troubling quadratic behavior...
 
@@ -321,12 +326,12 @@ msgpack.timings <- run_tests(arg_df(c(
         from = msgpack::unpackMsg))))))
 ```
 
-```{R}
-store(msgpack.timings)
+```{R, results = "hide"}
+benchmarks <- store(msgpack.timings, benchmarks)
 ```
 
 ```{R}
-(test.plot + labs("msgpack performance")) %+% filter(benchmarks, encoder == "msgpack")
+test.plot + labs(main="msgpack performance") %+% filter(benchmarks, encoder == "msgpack")
 ```
 
 Implementing the streaming-mode callback has helped a lot, but there
@@ -366,12 +371,12 @@ msgpackR.timings <- run_tests(arg_df(c(
         writer = function(data, conn) writeBin(msgpackR::pack(data), conn)))))))
 ```
 
-```{R}
-store(msgpackR.timings)
+```{R, results = "hide"}
+benchmarks <- store(msgpackR.timings, benchmarks)
 ```
 
 ```{R}
-(test.plot + labs("jsonlite performance")) %+% filter(benchmarks, encoder == "msgpackR")
+test.plot + labs(main="msgpackR performance") %+% filter(benchmarks, encoder == "msgpackR")
 ```
 
 ## rjson
@@ -388,12 +393,12 @@ rjson.timings <- run_tests(arg_df(c(
 
 rjson is rather zippy -- only `{R "several"}` times slower than msgpack :)
 
-```{R}
-store(rjson.timings)
+```{R results="hide"}
+benchmarks <- store(rjson.timings, benchmarks)
 ```
 
 ```{R}
-(test.plot + labs("rjson performance")) %+% filter(benchmarks, encoder == "rjson")
+test.plot + labs(main="rjson performance") %+% filter(benchmarks, encoder == "rjson")
 ```
 
 ## RJSONIO
@@ -411,14 +416,16 @@ RJSONIO.timings <- run_tests(arg_df(c(
         raw = TRUE))))))
 ```
 
-Oddly, RJSONIO's streaming function is quote slow.
+Oddly, RJSONIO's streaming read function is quite slow.
+
+```{R, results = "hide"}
+benchmarks <- store(RJSONIO.timings, benchmarks)
+```
 
 ```{R}
-store(RJSONIO.timings)
+test.plot + labs(main="RJSONIO performance") %+% filter(benchmarks, encoder == "RJSONIO")
 ```
-```{R}
-(test.plot + labs("RJSONIO performance")) %+% filter(benchmarks, encoder == "RJSONIO")
-```
+
 ## ndjson
 
 ndjson is a "wicked-fast" streaming JSON reader, but not a
@@ -433,4 +440,8 @@ Do we really have to go here? I suppose...
 ## YAML
 
 Oh dear.
+
+```{R}
+save(benchmarks, file="benchmarks.RData")
+```
  

@@ -318,38 +318,6 @@ timeCurve <- function(dataset,
   results
 }
 
-
-#e.g.,
-quote(
-    tests <- list(
-        strategy = list(
-          ,  convert = timeConvert
-          ,  connection = timeRawConnection
-          ,  file = timeFileIO
-          ,  fifo = timeFifoTransfer
-          ,  socket = timeSocketTransfer
-          ,  wire = timeWireTransfer
-        ),
-        encoder = list(
-            serialize = list(
-                unserialize
-              , function(data) serialize(data, NULL))
-          , dput = list(
-                deparse
-              , function(t) eval(parse(text=t)))
-          , jsonlite = list(
-                jsonlite::fromJSON
-              , jsonlite::toJSON)
-          , msgpack = list(
-                msgpack::packMsg
-              , msgpack::unpackMsg)
-          , RJSONIO = list(
-                RJSONIO::fromJSON,
-                RJSONIO::toJSON))
-      , dataset = list(nycflights13=list(dataset)))
-)
-
-
 arg_df <- function(tests) (tests
   # produces an arg data frame: the labels in columns and the argument
   # data structure in column "args"
@@ -367,11 +335,7 @@ arg_df <- function(tests) (tests
             %>% unlist(recursive = FALSE, use.names = TRUE))))
 )
 
-
-`%+%` <- union
-`%-%` <- setdiff
 `%*%` <- intersect
-# `%/%` <- dusjunctive union ???
 
 run_tests <- function(arg_df) (arg_df
   %>% pmap_dfr(function(..., args) {
@@ -396,22 +360,21 @@ run_tests <- function(arg_df) (arg_df
   })
 )
 
-benchmarks <- data.frame()
-store <- function(data) {
+store <- function(data, dataset) {
   # key on all character columns the two tables hav in common
   existing.keys <- names(benchmarks)[map_lgl(benchmarks, is.character)]
   new.keys <- names(data)[map_lgl(data, is.character)]
-  keys <- existing.keys %*% new.keys
+  keys <- intersect(existing.keys, new.keys)
   message(paste("Replacing on keys:", paste0("\"", keys, "\"", collapse=", ")))
   if (length(keys) > 0) {
-    benchmarks <<- (benchmarks          # update benchmarks
+    dataset <- (dataset          # update benchmarks
       %>% anti_join(data, by=keys)
       %>% bind_rows(data)
     )
   } else {
-    benchmarks <<- data
+    dataset <- data
   }
-  data
+  dataset
 }
 
 common.options <- list(
