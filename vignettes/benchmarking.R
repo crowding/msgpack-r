@@ -1,9 +1,12 @@
 ## ----- setup
+library(knitr)
+library(rmarkdown)
 library(purrr)
 library(dplyr)
 library(magrittr)
 library(tibble)
-library(msgpack)
+library(printr)
+library(ggplot2)
 
 ## ---- dataset
 library(nycflights13)
@@ -17,7 +20,7 @@ subsample <- function(dataset, rate) {
 
 onerow <- subsample(dataset, 0)
 
-## ---- definition
+## ---- definitions
 attach_env <- function(arg_, ...) {
   target <- new.env(parent = env(arg_))
   for (i in list(...)) {
@@ -204,7 +207,7 @@ port <- 42170
 timeSocketTransfer <- function(data,
                                reader = unserialize,
                                writer = serialize,
-                               wrap = identity,
+                                wrap = identity,
                                raw = TRUE, ...) {
   force(data)
   doRead <- function(other) {
@@ -295,9 +298,12 @@ timeCurve <- function(dataset,
                       ) {
   results <- data_frame()
   current <- start
-  cat("size = ", current, "\n")
+  if (missing(method)) {
+    message("method missing???")
+    return(data.frame())
+  }
   while (current <= max) {
-    cat("size = ", current, "\n")
+    message(paste0("size = ", current))
     data <- subsample(dataset, current)
     result <- method(data, ...)
     results <- bind_rows(results, as_tibble(c(size = current, result)))
@@ -370,7 +376,7 @@ arg_df <- function(tests) (tests
 run_tests <- function(arg_df) (arg_df
   %>% pmap_dfr(function(..., args) {
     labels <- list(...)
-    print(unlist(labels))
+    message(paste0(collapse = "\n", deparse(labels, control=c())))
     # what I want here is a bind syntax like
     ## bind({
     ##   list(strategy = ?fun, ??args) <- args
@@ -378,6 +384,13 @@ run_tests <- function(arg_df) (arg_df
     ## })
     fun <- args$strategy
     args <- args[names(args) != "strategy"]
+    the_env <- list2env(args, parent=environment())
+    # this dance is to avoid calling do.call with a giant unnamed dataset
+    # (which causes R to spin several minutes on writing a traceback)
+    call <- as.call(c(quote(fun),
+                      structure(map(names(args), as.name),
+                                names = names(args))))
+    results <- eval(call, the_env)
     results <- do.call(fun, args, quote = TRUE, envir = environment())
     as_data_frame(c(labels, results))
   })
@@ -447,6 +460,18 @@ all.common.options <- c(
 `%but%` <- function(l, r) {
   l[names(r)] <- r
   l
+}
+
+showTimings <- function(timings, label, ...) {
+  stats <- with(timings, c(
+    "total.elapsed (s)" = total.elapsed,
+    "read.cpu (s)" = read.user + read.sys,
+    "read.elapsed (s)" = read.elapsed,
+    "write.cpu (s)" = write.user + write.sys,
+    "write.elapsed (s)" = write.elapsed,
+    "data size (MB)" = bytes / 0x100000
+  ))
+  kable(stats, col.names = label, digits=2)
 }
 
 ## list(x = ?first, ??rest) -> list()
