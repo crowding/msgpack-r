@@ -1,4 +1,39 @@
 ## ----- setup
+ensureExists <- function(packages){
+  installed <- library()$results[,1]
+  needs.install <- setdiff(packages, installed)
+  if(length(needs.install) > 0) {
+    install.packages(needs.install)
+  }
+}
+
+if (exists("clust") && !is.null(clust)) {
+  stopCluster(clust)
+  clust <- NULL
+}
+
+ensureExists(c(
+  "knitr",
+  "rmarkdown",
+  "purrr",
+  "dplyr",
+  "magrittr",
+  "tibble",
+  "printr",
+  "ggplot2",
+  "nycflights13",
+  "parallel",
+  "ssh.utils",
+  "tools",
+  "msgpack",
+  "jsonlite",
+  "msgpackR",
+  "rjson",
+  "RJSONIO",
+  "yaml",
+  "broom"
+))
+
 library(knitr)
 library(rmarkdown)
 library(purrr)
@@ -9,6 +44,7 @@ library(printr)
 library(ggplot2)
 
 ## ---- dataset
+
 library(nycflights13)
 dataset <- as.list(as.environment("package:nycflights13"))
 
@@ -21,19 +57,40 @@ subsample <- function(dataset, rate) {
 onerow <- subsample(dataset, 0)
 
 ## ---- definitions
-attach_env <- function(arg_, ...) {
-  target <- new.env(parent = env(arg_))
-  for (i in list(...)) {
-    e <- as.environment(i)
-    # think about "inject_env" here
-    inject(e, target)
+
+remoteHost <- "paradoxus.local"
+port <- 42170
+
+bufferBytes <- function(f) function(con, chunk = 65536L) {
+  buf <- rawConnection(raw(0), open="w")
+  repeat {
+    result <- readBin(con = con, what = "raw", n = chunk)
+    if (length(result) == 0) break
+    writeBin(result, buf)
   }
-  env(arg_) <- target
+  f(rawConnectionValue(buf))
 }
 
-inject <- function(from, to_env) {
-  f <- as.environment(from)
-  dots2env(as.dots(f), envir = to_env)
+bufferBytes2 <- function(f) function(con, chunk = 65536L) {
+  buf <- msgpack:::catenator(raw(0)) # this is faster
+  repeat {
+    result <- readBin(con = con, what = "raw", n = chunk)
+    if (length(result) == 0) break
+    buf(result)
+  }
+  f(buf(action="read"))
+}
+
+bufferLines <- function(reader) function(con) {
+  lines <- msgpack:::catenator(character(0))
+  repeat {
+    l <- readLines(con)
+    if (length(l) == 0) break()
+    lines(l)
+  }
+  buf <- textConnection(lines(action="read"))
+  on.exit(close(buf))
+  reader(buf)
 }
 
 forked <- function(ifParent, ifChild) {
@@ -45,22 +102,20 @@ forked <- function(ifParent, ifChild) {
     # we are child process
     tryCatch({
       result <- ifChild(x)
-      #cat("ran child\n")
-      parallel:::mcexit(0, send=result)
+      parallel:::mcexit(0, send = result)
     },
     error =
-        function(err) {
-            ##cat("child error\n")
-            parallel:::mcexit(1, send=err)
+      function(e) {
+        parallel:::mcexit(1, send = list(error=e, calls=sys.calls()))
       }
     )
   } else {
     # we are master process
-    mine <- tryCatch(ifParent(x), error = identity)
-    #cat("ran parent\n");
-    theirs <- tryCatch(unserialize(parallel:::readChild(other)), error=identity)
-    #cat("read from child\n");
-    Sys.sleep(1) #wait for child to finish?
+    mine <- tryCatch(ifParent(x),
+                     error = function(e) list(error=e, calls = sys.calls()))
+    theirs <- tryCatch(
+      unserialize(parallel:::readChild(other)),
+      error = function(e) list(error=e, calls=sys.calls()))
     child_pids <- vapply(parallel:::children(), function(x) x$pid, 0)
     if (other$pid %in% child_pids) {
       warning("Killing child process ", deparse(other))
@@ -77,7 +132,7 @@ times <- function(start.write, end.write,
                   bytes, result,
                   start.parent, end.parent, ...) {
   c(list(extra=list(list(...))),
-    if (missing(end.read))
+    if (missing(end.read) || missing(end.write))
       list()
     else
       c(read.user = end.read[["user.self"]] - start.read[["user.self"]],
@@ -86,12 +141,14 @@ times <- function(start.write, end.write,
         write.user = end.write[["user.self"]] - start.write[["user.self"]],
         write.sys = end.write[["sys.self"]] - start.write[["sys.self"]],
         write.elapsed = end.write[["elapsed"]] - start.write[["elapsed"]],
-        total.user = (end.read[["user.self"]] + end.write[["user.self"]]
-          - start.write[["user.self"]] - start.read[["user.self"]]),
-        total.sys = (end.read[["sys.self"]] + end.write[["sys.self"]]
-          - start.write[["sys.self"]] - start.read[["sys.self"]]),
-        total.elapsed = ( max(end.write[["elapsed"]], end.read[["elapsed"]])
-          - min(start.write[["elapsed"]], start.read[["elapsed"]]))),
+        total.user =
+          (   end.read[["user.self"]] + end.write[["user.self"]]
+            - start.write[["user.self"]] - start.read[["user.self"]]),
+        total.sys =
+          (   end.read[["sys.self"]] + end.write[["sys.self"]]
+            - start.write[["sys.self"]] - start.read[["sys.self"]]),
+        total.elapsed = max(end.read[["elapsed"]] - start.read[["elapsed"]],
+                            end.write[["elapsed"]] - start.write[["elapsed"]])),
     bytes = if (missing(bytes)) list() else bytes,
     result = if (missing(result) || !return_result) list() else list(result),
     parent = if (missing(start.parent)) list()
@@ -203,11 +260,10 @@ timeFileIO <- function(data,
         nbytes, as.read)
 }
 
-port <- 42170
 timeSocketTransfer <- function(data,
                                reader = unserialize,
                                writer = serialize,
-                                wrap = identity,
+                               wrap = identity,
                                raw = TRUE, ...) {
   force(data)
   doRead <- function(other) {
@@ -220,10 +276,10 @@ timeSocketTransfer <- function(data,
     as.read <- reader(conn)
     end.read <- proc.time()
     list(start.read = start.read,
-         end.read = end.read,
-         result = as.read)
+         end.read = end.read)
   }
   doWrite <- function(other) {
+    Sys.sleep(0.5)
     conn <- wrap(socketConnection(port = port, server = FALSE,
                                   blocking = TRUE,
                                   open = paste0("w", if(raw) "b" else "")))
@@ -254,7 +310,7 @@ timeFifoTransfer <- function(data,
   system(paste("mkfifo", fnam))
 
   doRead <- function(other) {
-    Sys.sleep(1)
+    Sys.sleep(0.5)
     conn <- wrap(fifo(fnam, open = "rb", blocking = TRUE))
     on.exit({
       close(conn)
@@ -263,8 +319,7 @@ timeFifoTransfer <- function(data,
     as.read <- reader(conn)
     end.read <- proc.time()
     list(start.read = start.read,
-         end.read = end.read,
-         result = as.read)
+         end.read = end.read)
   }
   doWrite <- function(other) {
     conn <- fifo(fnam, open = "wb", blocking = TRUE)
@@ -288,6 +343,83 @@ timeFifoTransfer <- function(data,
                    list(start.parent = start.parent,
                         end.parent = end.parent)),
           quote=TRUE)
+}
+
+clust <<- NULL
+startRemote <- function() {
+  message("starting remote")
+  ssh.utils::run.remote("killall R", remoteHost)
+  clust <- makePSOCKcluster(nnodes=1, c(remoteHost), rscript = "Rscript")
+  rtmp <- clusterCall(clust, tempdir)
+  message("rtmp is ", rtmp)
+  message("getwd is ", getwd())
+
+  ssh.utils::cp.remote(remote.src = "",
+                       path.src = "benchmarking.R",
+                       remote.dest = remoteHost,
+                       path.dest = paste0(rtmp, "/benchmarking.R"))
+  clusterCall(clust, options, repos = getOption("repos"))
+  parallel::clusterCall(clust, source, paste0(rtmp, "/benchmarking.R"))
+  clust <<- clust
+  message("started remote")
+}
+
+doRemoteWrite <- function(data, host, port, wrap, raw, writer) {
+  tryCatch({
+    Sys.sleep(1)
+    conn <- wrap(socketConnection(host = host,
+                                  port = port,
+                                  server = FALSE,
+                                  blocking = TRUE,
+                                  open = paste0("w", if(raw) "b" else "")))
+    start.write <- proc.time()
+    on.exit(close(conn))
+    writer(data, conn)
+    flush(conn)
+    end.write <- proc.time()
+    list(start.write = start.write,
+         end.write = end.write, bytes=NA)
+  },
+  error = function(e) list(error=e, calls=sys.calls()))
+}
+
+doRemoteRead <- function(port, wrap, raw, reader) {
+  tryCatch({
+    conn <- wrap(socketConnection(port = port,
+                                  server = TRUE,
+                                  blocking = TRUE,
+                                  open = paste0("r", if(raw) "b" else ""),
+                                  timeout = 60))
+    on.exit(close(conn))
+    start.read <- proc.time()
+    as.read <- reader(conn)
+    end.read <- proc.time()
+    list(start.read = start.read,
+         end.read = end.read)
+  },
+  error = function(e) list(error=e, calls=sys.calls())
+  )
+}
+
+timeRemoteTransfer <- function(data,
+                               reader = bufferBytes(unserialize),
+                               writer = serialize,
+                               wrap = identity,
+                               raw = TRUE,
+                               ...) {
+  force(data)
+  if (is.null(clust)) {
+    startRemote()
+  }
+
+  parallel:::sendCall(clust[[1]],
+                      doRemoteRead,
+                      list(port, wrap, raw, reader))
+  local_results <- tryCatch(
+    doRemoteWrite(data, remoteHost, port, wrap, raw, writer),
+    error = function(e) list(error = e, calls = sys.calls()))
+  remote_results <- parallel:::recvResult(clust[[1]])
+  do.call(times, c(local_results, remote_results), quote=TRUE)
 }
 
 timeCurve <- function(dataset,
@@ -337,8 +469,8 @@ arg_df <- function(tests) (tests
 
 `%*%` <- intersect
 
-run_tests <- function(arg_df) (arg_df
-  %>% pmap_dfr(function(..., args) {
+run_tests <- function(arg_df) {
+  pmap_dfr(arg_df, function(..., args) {
     labels <- list(...)
     message(paste0(collapse = "\n", deparse(labels, control=c())))
     # what I want here is a bind syntax like
@@ -348,17 +480,17 @@ run_tests <- function(arg_df) (arg_df
     ## })
     fun <- args$strategy
     args <- args[names(args) != "strategy"]
-    the_env <- list2env(args, parent=environment())
+    the_env <- list2env(args, parent = environment())
+
     # this dance is to avoid calling do.call with a giant unnamed dataset
     # (which causes R to spin several minutes on writing a traceback)
     call <- as.call(c(quote(fun),
                       structure(map(names(args), as.name),
                                 names = names(args))))
     results <- eval(call, the_env)
-    results <- do.call(fun, args, quote = TRUE, envir = environment())
     as_data_frame(c(labels, results))
   })
-)
+}
 
 store <- function(data, dataset) {
   # key on all character columns the two tables hav in common
@@ -388,12 +520,22 @@ conversion.methods <- list(
     convert = list(method = timeConvert))
 )
 
-connection.methods <- list(
+synchronous.methods <- list(
   method = list(
     conn = list(method = timeConnection),
-    file = list(method = timeFileIO),
-    fifo = list(method = timeFifoTransfer),
-    socket = list(method = timeSocketTransfer))
+    file = list(method = timeFileIO)
+))
+
+concurrent.methods <- list(
+  method = list(
+    remote = list(method = timeRemoteTransfer),
+    socket = list(method = timeSocketTransfer),
+    fifo = list(method = timeFifoTransfer))
+)
+
+connection.methods <- list(
+  method = c(concurrent.methods$method,
+             synchronous.methods$method)
 )
 
 convert.common.options <- c(
@@ -404,13 +546,13 @@ convert.common.options <- c(
 raw.common.options <- c(
   common.options,
   conversion.methods,
-  etc = list(raw = list(raw = TRUE))
+  raw = list('TRUE' = list(raw = TRUE))
 )
 
 text.common.options <- c(
   common.options,
   conversion.methods,
-  etc = list(raw = list(raw = FALSE))
+  raw = list('FALSE' = list(raw = FALSE))
 )
 
 all.common.options <- c(
@@ -419,6 +561,39 @@ all.common.options <- c(
     method = c(connection.methods$method,
                conversion.methods$method))
 )
+
+buffer_read_options <- function(reader = identity,
+                              raw = FALSE,
+                              buffer = (if (raw) bufferBytes else bufferLines)) {
+  c(common.options,
+    list(raw = structure(list(list(raw = raw)), names = as.character(raw))),
+    list(method = list(
+      conn = list(method = timeConnection,
+                  reader = reader),
+      file = list(method = timeFileIO,
+                  reader = reader),
+      fifo = list(method = timeFifoTransfer,
+                  reader = buffer(reader)),
+      socket = list(method = timeSocketTransfer,
+                    reader = buffer(reader)),
+      remote = list(method = timeRemoteTransfer,
+                    reader = buffer(reader))
+    ))
+    )
+}
+
+combine_opts <- function(x, ...) {
+  for (l in list(...)) {
+    for (n in names(l)) {
+      if (n %in% names(x)) {
+        x[[n]] <- c(x[[n]], l[[n]])
+      } else {
+        x[[n]] <- c(x[[n]], l[[n]])
+      }
+    }
+  }
+  x;
+}
 
 `%but%` <- function(l, r) {
   l[names(r)] <- r
