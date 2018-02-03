@@ -1,9 +1,9 @@
 Package: msgpack
-Title: A Blazing Fast Structured Data Format.
-Version: 0.99.0
+Title: A Compact, High Speed Data Interchange Format
+Version: 1.0
 Author: Peter Meilstrup <peter.meilstrup@gmail.com>
 Maintainer: Peter Meilstrup <peter.meilstrup@gmail.com>
-Description: An extremely fast C-based encoder and streaming decoder for the
+Description: A fast C-based encoder and streaming decoder for the
              msgpack data format, Msgpack is nearly a
              drop-in replacement for JSON, but is more compact and
              faster to parse. Based on the CWPack C library.
@@ -12,12 +12,8 @@ Depends:
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
-VignetteBuilder: knitr
 Suggests:
-    testthat,
-    knitr,
-    rmarkdown,
-    msgpackR,
-    jsonlite    
+    testthat, R.rsp
+VignettteBuilder: R.rsp
 RoxygenNote: 6.0.1
 Roxygen: list(markdown=TRUE)

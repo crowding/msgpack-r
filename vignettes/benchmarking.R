@@ -81,6 +81,17 @@ bufferBytes2 <- function(f) function(con, chunk = 65536L) {
   f(buf(action="read"))
 }
 
+bufferRawConn <- function(f) function(con, chunk = 65536L) {
+  buf <- msgpack:::catenator(raw(0)) # this is faster
+  repeat {
+    result <- readBin(con = con, what = "raw", n = chunk)
+    if (length(result) == 0) break
+    buf(result)
+  }
+  f(rawConnection(buf(action="read"), open="r"))
+}
+
+
 bufferLines <- function(reader) function(con) {
   lines <- msgpack:::catenator(character(0))
   repeat {
@@ -93,29 +104,38 @@ bufferLines <- function(reader) function(con) {
   reader(buf)
 }
 
-forked <- function(ifParent, ifChild) {
+forked <- function(ifParent, ifChild, catch=TRUE) {
   #   Fork the R process. In the parent process call ifParent(), in
   #   the child process call ifChild(). Return a list of return value of
   #   both functions, or error messages.
   other <- parallel:::mcfork()
   if (inherits(other, "masterProcess")) {
     # we are child process
-    tryCatch({
+    if (catch) {
+      tryCatch({
+        result <- ifChild(x)
+        parallel:::mcexit(0, send = result)
+      },
+      error =
+        function(e) {
+          parallel:::mcexit(1, send = list(error=e, calls=sys.calls()))
+        }
+      )
+    } else {
       result <- ifChild(x)
       parallel:::mcexit(0, send = result)
-    },
-    error =
-      function(e) {
-        parallel:::mcexit(1, send = list(error=e, calls=sys.calls()))
-      }
-    )
+    }
   } else {
     # we are master process
-    mine <- tryCatch(ifParent(x),
-                     error = function(e) list(error=e, calls = sys.calls()))
+    if (catch) {
+      mine <- tryCatch(ifParent(x),
+                       error = if (catch) function(e) list(error=e, calls = sys.calls()) else NULL)
+    } else {
+      mine <- ifParent(x)
+    }
     theirs <- tryCatch(
       unserialize(parallel:::readChild(other)),
-      error = function(e) list(error=e, calls=sys.calls()))
+      error = if(catch) function(e) list(error=e, calls=sys.calls()) else NULL)
     child_pids <- vapply(parallel:::children(), function(x) x$pid, 0)
     if (other$pid %in% child_pids) {
       warning("Killing child process ", deparse(other))
@@ -264,7 +284,8 @@ timeSocketTransfer <- function(data,
                                reader = unserialize,
                                writer = serialize,
                                wrap = identity,
-                               raw = TRUE, ...) {
+                               raw = TRUE,
+                               catch = FALSE, ...) {
   force(data)
   doRead <- function(other) {
     conn <- wrap(socketConnection(port = port,
@@ -292,7 +313,7 @@ timeSocketTransfer <- function(data,
          end.write = end.write, bytes=NA)
   }
   start.parent <- proc.time()
-  results <- forked(ifChild = doWrite, ifParent = doRead)
+  results <- forked(ifChild = doWrite, ifParent = doRead, catch = catch)
   end.parent <- proc.time()
 
   do.call(times, c(results,
@@ -303,7 +324,8 @@ timeSocketTransfer <- function(data,
 timeFifoTransfer <- function(data,
                              reader = unserialize,
                              writer = serialize,
-                             wrap = identity, ...) {
+                             wrap = identity,
+                             catch = FALSE, ...) {
   force(data)
   fnam <- tempfile()
   on.exit(unlink(fnam, force = TRUE))
@@ -336,7 +358,7 @@ timeFifoTransfer <- function(data,
   }
 
   start.parent <- proc.time()
-  results <- forked(ifChild = doWrite, ifParent = doRead)
+  results <- forked(ifChild = doWrite, ifParent = doRead, catch = catch)
   end.parent <- proc.time()
 
   do.call(times, c(results,
@@ -384,12 +406,15 @@ doRemoteWrite <- function(data, host, port, wrap, raw, writer) {
 }
 
 doRemoteRead <- function(port, wrap, raw, reader) {
+  # place logging statements in here...
+
   tryCatch({
-    conn <- wrap(socketConnection(port = port,
-                                  server = TRUE,
-                                  blocking = TRUE,
-                                  open = paste0("r", if(raw) "b" else ""),
-                                  timeout = 60))
+    sock <- socketConnection(port = port,
+                             server = TRUE,
+                             blocking = TRUE,
+                             open = paste0("r", if(raw) "b" else ""),
+                             timeout = 60)
+    conn <- wrap(sock)
     on.exit(close(conn))
     start.read <- proc.time()
     as.read <- reader(conn)
@@ -473,7 +498,7 @@ run_tests <- function(arg_df) {
   pmap_dfr(arg_df, function(..., args) {
     labels <- list(...)
     message(paste0(collapse = "\n", deparse(labels, control=c())))
-    # what I want here is a bind syntax like
+    # what I want is a bind syntax like
     ## bind({
     ##   list(strategy = ?fun, ??args) <- args
     ##   fun(!!args)
@@ -564,7 +589,7 @@ all.common.options <- c(
 
 buffer_read_options <- function(reader = identity,
                               raw = FALSE,
-                              buffer = (if (raw) bufferBytes else bufferLines)) {
+                              buffer = (if (raw) bufferBytes2 else bufferLines)) {
   c(common.options,
     list(raw = structure(list(list(raw = raw)), names = as.character(raw))),
     list(method = list(

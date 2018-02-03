@@ -11,7 +11,7 @@ transmit and store.
 
 ## Installation
 
-```{R}
+```{R eval=FALSE}
 library(devtools)
 install_github("crowding/msgpack-r")
 ```
@@ -24,14 +24,19 @@ packMsg( list(compact=TRUE, schema=0) )
 unpackMsg( .Last.value )
 ```
 
-### Streaming
+### Connections / Streaming
 
 ```{r}
-
+con <- msgConnection(rawConnection())
+writeMsg("one", con)
+writeMsgs(list(2, c(buckle="true"), c(owner="my", type="shoe")))
+con <- msgConnection(rawConnection(rawConnectionValue(con)))
+readMsgs(con, 2)
+readMsg(con)
+readMsgs(con)
 ```
 
-### Performance and compactness
+### Performance
 
-```{R}
+See the vignette.
 
-```
