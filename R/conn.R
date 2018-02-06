@@ -5,7 +5,7 @@
 #'   store. `NA` means do not enforce a limit.
 #' @param read_size How many bytes to read at a time.
 #' @param ... Unpacking options (see [unpackMsg]).
-#' @return [msgConnection()] returns an object of class 'msgConnection'
+#' @return `msgConnection()` returns an object of class "`msgConnection`".
 #'
 #' Because msgpack messages have unpredictable length, the decoder
 #' reads ahead in chunks, then finds the boundaries between messages.
@@ -14,7 +14,7 @@
 #' readBin on the same connection.
 #'
 #' If you are reading data from a not completely trusted source you
-#' will probably want to give options `max_size` and `max_depth` (see
+#' should specify options `max_size` and `max_depth` (see
 #' [unpackOpts]). Without it, some deeply nested or cleverly designed
 #' messages can cause a stack overflow or out-of-memory error.  With
 #' these options set, you will get an R exception instead.
@@ -62,7 +62,6 @@ summary.msgConnection <- function(object, ...) {
   c(s, list(status = status(object)))
 }
 
-# TODO: read raw method, to interleave with readMsgs.
 
 #' @rdname msgConnection
 #' @export
@@ -167,8 +166,6 @@ lister <- function(val = list()) {
 
 addClass <- function(x, classes) structure(x, class = c(classes, class(x)))
 
-#' ...
-#'
 #' @return `partial(con)` returns any data that has been read ahead of
 #'   the last decoded message.
 #' @rdname msgConnection
@@ -185,7 +182,7 @@ partial.msgConnection <- function(con) {
 #' @export
 #' @param n The maximum number of messages to read. A value of NA
 #'     means to parse all available messages until end of input.
-#' @return A list of up to `n` decoded messages.
+#' @return `readMsgs(con, n)` returns a list of up to `n` decoded messages.
 readMsgs <- function(con, n = NA, ...) {
   UseMethod("readMsgs")
 }
@@ -195,8 +192,6 @@ readMsgs.msgConnection <- function(con, n = NA, ...) {
   attr(con, "reader")$readMsgs(n, ...)
 }
 
-#' ...
-#'
 #' @rdname msgConnection
 #' @return `status(con)` returns the status of msgpack decoding on the
 #'   connection. A value of `"ok"` indicates all requested messages
@@ -214,11 +209,9 @@ status.msgConnection <- function(con) {
 }
 
 
-#' ...
-#'
-#' `seek(con)` returns the number of bytes that have been successfully
-#' read or written.
 #' @rdname msgConnection
+#' @return `seek(con)` returns the number of bytes that have been successfully
+#' read or written.
 #' @param rw See `seek()`.
 #' @export
 seek.msgConnection <- function(con, rw = summary(con)$mode, ...) {
@@ -229,8 +222,6 @@ seek.msgConnection <- function(con, rw = summary(con)$mode, ...) {
          )
 }
 
-#' ...
-#'
 #' @rdname msgConnection
 #' @return `readMsg(con)` returns exactly one message, or throws an error.
 #' @export

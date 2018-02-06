@@ -1,5 +1,5 @@
 Package: msgpack
-Title: A Compact, High Speed Data Interchange Format
+Title: A Compact, High Speed Data Format
 Version: 1.0
 Author: Peter Meilstrup <peter.meilstrup@gmail.com>
 Maintainer: Peter Meilstrup <peter.meilstrup@gmail.com>
@@ -13,7 +13,6 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Suggests:
-    testthat, R.rsp
-VignettteBuilder: R.rsp
+    testthat, rmarkdown, svglite, R.rsp
 RoxygenNote: 6.0.1
 Roxygen: list(markdown=TRUE)

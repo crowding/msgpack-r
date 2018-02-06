@@ -11,7 +11,7 @@ unpackMsg(x, ...)
 unpackMsgs(x, n = NA, reader = NULL, ...)
 
 unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
-  max_depth = NA, underflow_handler = NULL, x = raw(0))
+  max_depth = NA, underflow_handler = NULL)
 }
 \arguments{
 \item{x}{A \code{\link[=raw]{raw()}} object, perhaps read from a file or socket.}

@@ -56,7 +56,7 @@ means to parse all available messages until end of input.}
 \item{objs}{A list of R objects.}
 }
 \value{
-\code{\link[=msgConnection]{msgConnection()}} returns an object of class 'msgConnection'
+\code{msgConnection()} returns an object of class "\code{msgConnection}".
 
 Because msgpack messages have unpredictable length, the decoder
 reads ahead in chunks, then finds the boundaries between messages.
@@ -65,7 +65,7 @@ nonblocking connection, and it will not work to mix readMsg and
 readBin on the same connection.
 
 If you are reading data from a not completely trusted source you
-will probably want to give options \code{max_size} and \code{max_depth} (see
+should specify options \code{max_size} and \code{max_depth} (see
 \link{unpackOpts}). Without it, some deeply nested or cleverly designed
 messages can cause a stack overflow or out-of-memory error.  With
 these options set, you will get an R exception instead.
@@ -73,7 +73,7 @@ these options set, you will get an R exception instead.
 \code{partial(con)} returns any data that has been read ahead of
 the last decoded message.
 
-A list of up to \code{n} decoded messages.
+\code{readMsgs(con, n)} returns a list of up to \code{n} decoded messages.
 
 \code{status(con)} returns the status of msgpack decoding on the
 connection. A value of \code{"ok"} indicates all requested messages
@@ -82,19 +82,13 @@ the line, \code{"end of input"} means the last available message has
 been read.  Other values indicate errors encountered in decoding,
 which will effectively halt reading.
 
+\code{seek(con)} returns the number of bytes that have been successfully
+read or written.
+
 \code{readMsg(con)} returns exactly one message, or throws an error.
 }
 \description{
 Read and write msgpack messages using a connection.
-
-...
-
-...
-
-\code{seek(con)} returns the number of bytes that have been successfully
-read or written.
-
-...
 
 ...
 

@@ -1,2 +1,6 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^vignettes/comparison_cache$
+^vignettes/comparison_files$
+^README.Rmd$
+^README.html$
