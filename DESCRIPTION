@@ -13,6 +13,7 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Suggests:
-    testthat, rmarkdown, svglite, R.rsp
+    testthat, R.rsp, rmarkdown, svglite
+VignetteBuilder: R.rsp
 RoxygenNote: 6.0.1
 Roxygen: list(markdown=TRUE)

@@ -4,3 +4,4 @@
 ^vignettes/comparison_files$
 ^README.Rmd$
 ^README.html$
+^.git
