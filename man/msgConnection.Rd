@@ -12,7 +12,7 @@
 \alias{readMsg}
 \alias{writeMsg}
 \alias{writeMsgs}
-\title{Read and write msgpack messages using a connection.}
+\title{Read and write msgpack formatted messages over R connections.}
 \usage{
 msgConnection(con, read_size = 2^16, max_size = NA, ...)
 
@@ -41,8 +41,8 @@ writeMsgs(objs, con, ...)
 
 \item{read_size}{How many bytes to read at a time.}
 
-\item{max_size}{The largest partial uncompleted message to
-store. \code{NA} means do not enforce a limit.}
+\item{max_size}{The largest partial message to store, in
+bytes. \code{NA} means do not enforce a limit.}
 
 \item{...}{Unpacking options (see \link{unpackMsg}).}
 
@@ -56,8 +56,41 @@ means to parse all available messages until end of input.}
 \item{objs}{A list of R objects.}
 }
 \value{
-\code{msgConnection()} returns an object of class "\code{msgConnection}".
+\code{msgConnection()} returns an object of class
+\code{msgConnection}.
 
+\code{partial(con)} returns any data that has been read ahead of
+the last decoded message.
+
+\code{readMsgs(con, n)} returns a list of up to \code{n} decoded messages.
+
+\code{status(con)} returns the status of msgpack decoding on the
+connection. A value of \code{"ok"} indicates all requested messages
+were read, \code{"buffer underflow"} for a non-blocking connection
+indicates that only part of a message has been received, and
+\code{"end of input"} means the last available message has been read.
+Other values indicate errors encountered in decoding, which will
+effectively halt reading.
+
+\code{seek(con)} returns the number of bytes that have been
+successfully read or written, depending on the mode of the
+connection. (Repositioning is not supported.)
+
+\code{readMsg(con)} returns one decoded message.
+}
+\description{
+A \code{msgConnection} object decodes msgpack messages from an
+underlying R raw connection.
+
+\code{readMsg(con)} reads exactly one message from a
+msgConnection, or throws an error.
+
+\code{writeMsg(x, con)} writes a single message to a msgConnection.
+
+\code{writeMsg} will work with anyR connection inraw mode, but reading
+requires a msgConnection object.
+}
+\details{
 Because msgpack messages have unpredictable length, the decoder
 reads ahead in chunks, then finds the boundaries between messages.
 Therefore when reading over a socket or a fifo it is best to use a
@@ -69,33 +102,6 @@ should specify options \code{max_size} and \code{max_depth} (see
 \link{unpackOpts}). Without it, some deeply nested or cleverly designed
 messages can cause a stack overflow or out-of-memory error.  With
 these options set, you will get an R exception instead.
-
-\code{partial(con)} returns any data that has been read ahead of
-the last decoded message.
-
-\code{readMsgs(con, n)} returns a list of up to \code{n} decoded messages.
-
-\code{status(con)} returns the status of msgpack decoding on the
-connection. A value of \code{"ok"} indicates all requested messages
-were read, \code{"buffer underflow"} indicates a partial message is on
-the line, \code{"end of input"} means the last available message has
-been read.  Other values indicate errors encountered in decoding,
-which will effectively halt reading.
-
-\code{seek(con)} returns the number of bytes that have been successfully
-read or written.
-
-\code{readMsg(con)} returns exactly one message, or throws an error.
-}
-\description{
-Read and write msgpack messages using a connection.
-
-...
-
-\code{writeMsgs(l, conn)} writes a list of
-messages to a connection. That is, \code{writeMsg(1:10, conn)} writes one
-message containing an array, while \code{writeMsgs(1:10, conn)} writes
-ten consecutive messages each containing one integer.
 }
 \examples{
 out <- rawConnection(raw(0), open="wb")

@@ -4,7 +4,7 @@
 \alias{unpackMsg}
 \alias{unpackMsgs}
 \alias{unpackOpts}
-\title{Unpack raw objects in msgpack format into R data structures.}
+\title{Decode msgpack messages.}
 \usage{
 unpackMsg(x, ...)
 
@@ -45,6 +45,25 @@ vectors.}
 \code{unpackMsg(x)} returns one decoded message (which might be
 shorter than the input raw), or throws an error.
 
+\code{unpackMsgs(r, n)} returns a list \code{X} with four elements:
+\itemize{
+\item \code{X$msgs} is a list of the messages unpacked.
+\item \code{X$remaining} is data remaining to be parsed.
+\item \code{X$status} is a status message, typically "ok", "end of input",
+or "buffer underflow".
+\item \code{x$bytes_read} the number of bytes consumed.
+}
+}
+\description{
+\code{unpackMsg} converts a raw array containing one message in msgpack
+format into the corresponding R data structure.
+
+\code{unpackMsgs} extracts a number of msgpack messages from a raw object.
+
+\code{\link[=unpackOpts]{unpackOpts()}} interprets is passed to \code{...} in \code{\link[=unpackMsgs]{unpackMsgs()}},
+\code{\link[=unpackMsg]{unpackMsg()}}, and \code{\link[=msgConnection]{msgConnection()}}. It is not exported.
+}
+\details{
 The msgpack format does not have typed arrays, so all msgpack
 arrays are effectively lists from the R perspective. However, if an
 array containing compatibly typed elements is read, \code{unpack} will
@@ -68,24 +87,6 @@ it will be converted to string with \code{\link[=deparse]{deparse()}}.
 
 Extension types will be decoded as raw objects with a class like
 \code{"ext120"} and a warning.
-
-\code{unpackMsgs(r, n)} returns a list \code{X} with four elements:
-\itemize{
-\item \code{X$msgs} is a list of the messages unpacked.
-\item \code{X$remaining} is data remaining to be parsed.
-\item \code{X$status} is a status message, typically "ok", "end of input",
-or "buffer underflow".
-\item \code{x$bytes_read} the number of bytes consumed.
-}
-}
-\description{
-Unpack raw objects in msgpack format into R data structures.
-
-Extract a number of msgpack messages from a raw object.
-
-\code{\link[=unpackOpts]{unpackOpts()}} interprets the options that are common to
-\code{\link[=unpackMsgs]{unpackMsgs()}}, \code{\link[=unpackMsg]{unpackMsg()}}, and \code{\link[=msgConnection]{msgConnection()}}. It is not
-exported.
 }
 \examples{
 msg <- as.raw(c(0x82, 0xa7, 0x63, 0x6f, 0x6d, 0x70, 0x61, 0x63, 0x74, 0xc3,

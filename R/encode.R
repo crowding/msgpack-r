@@ -1,27 +1,30 @@
-#' Encode an R object into a raw vector using msgpack.
+#' Convert R objects to msgpack format.
 #'
 #' @param x An R object, which can be null, a vector, list,
 #'   environment, raw, or any combinations thereof.
+#' @param ... Options passed to [packOpts()]
+#' @return An object of class "raw".
+#' @details
+#' Strings are re-encoded to UTF-8 if necessary. Real numbers
+#' taking integral values may be emitted as integers to save space.
 #'
-#' Strings are re-encoded to UTF-8 if necessary. Integral
-#' real values may be emitted as integers to save space.
-#'
-#' Objects having class `AsIs,` and their contents, are encoded
-#' without using scalars (same as when option `as_is` is TRUE) and are
-#' not further pre-processed.
+#' Normally an R vector of length 1 will be unboxed, e.g. packMsg(1)
+#' will make a msgpack integer, but packMsg(c(1,2)) will make a
+#' msgpack list. To prevent this and produce a list of length 1 in the
+#' first case, specify `as_is = TRUE`. Objects of class `AsIs` or
+#' `data.frame` will always be encoded as-is.
 #'
 #' A hook for pre-processing R objects before packing is supported, by
 #' giving the object an S3 [class] and implementing a method
 #' `prepack`. For instance, `prepack.data.frame(x)` simply adds the
 #' `"AsIs"` class to `x`.
 #'
-#' Environment objects are written with the keys in sorted order, but
-#' named vectors are written in the order which the entries appear.
+#' Environment objects are written out with the keys in sorted order,
+#' but named vectors are written in the order which the entries
+#' appear.
 #'
-#' Object attributes other than `name` and `class` are ignored.
+#' Object attributes other than `names` and `class` are ignored.
 #'
-#' @param ... Options controlling packing, as described on this page.
-#' @return An object of class "raw".
 #' @examples
 #' packMsg( list(compact=TRUE, schema=0) )
 #' @export
@@ -40,6 +43,9 @@ packMsgs <- function(xs, ...) {
  unlist(lapply(xs, function(xx) .Call("_pack_msg", xx, opts)))
 }
 
+#' [packOpts()] interprets the `...` argument of packMsg and
+#' packMsgs. it is not exported.
+#'
 #' @param compatible If TRUE, emitted bytes conform to version 1.0 of
 #'   msgpack encoding. This means that msgpack strings are used for
 #'   raw objects.
@@ -51,8 +57,9 @@ packMsgs <- function(xs, ...) {
 #'   names are discarded.
 #' @param max_size The largest buffer that will be allocated.
 #' @param buf_size The initial amount of memory, in bytes, to allocate
-#'   for packing each message. Currently there is little reason to
-#'   change this.
+#'   for packing each message. This will be dynamically grown if a
+#'   larger message is passed, so there is little reason to change
+#'   this.
 #' @rdname packMsg
 packOpts <- function(compatible = FALSE,
                     as_is = FALSE,

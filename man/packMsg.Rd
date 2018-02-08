@@ -7,7 +7,7 @@
 \alias{prepack}
 \alias{prepack.default}
 \alias{prepack.data.frame}
-\title{Encode an R object into a raw vector using msgpack.}
+\title{Convert R objects to msgpack format.}
 \usage{
 packMsg(x, ...)
 
@@ -24,26 +24,9 @@ prepack(x)
 }
 \arguments{
 \item{x}{An R object, which can be null, a vector, list,
-environment, raw, or any combinations thereof.
+environment, raw, or any combinations thereof.}
 
-Strings are re-encoded to UTF-8 if necessary. Integral
-real values may be emitted as integers to save space.
-
-Objects having class \code{AsIs,} and their contents, are encoded
-without using scalars (same as when option \code{as_is} is TRUE) and are
-not further pre-processed.
-
-A hook for pre-processing R objects before packing is supported, by
-giving the object an S3 \link{class} and implementing a method
-\code{prepack}. For instance, \code{prepack.data.frame(x)} simply adds the
-\code{"AsIs"} class to \code{x}.
-
-Environment objects are written with the keys in sorted order, but
-named vectors are written in the order which the entries appear.
-
-Object attributes other than \code{name} and \code{class} are ignored.}
-
-\item{...}{Options controlling packing, as described on this page.}
+\item{...}{Options passed to \code{\link[=packOpts]{packOpts()}}}
 
 \item{xs}{a list of objects to pack.}
 
@@ -62,14 +45,39 @@ names are discarded.}
 \item{max_size}{The largest buffer that will be allocated.}
 
 \item{buf_size}{The initial amount of memory, in bytes, to allocate
-for packing each message. Currently there is little reason to
-change this.}
+for packing each message. This will be dynamically grown if a
+larger message is passed, so there is little reason to change
+this.}
 }
 \value{
 An object of class "raw".
 }
 \description{
-Encode an R object into a raw vector using msgpack.
+Convert R objects to msgpack format.
+
+\code{\link[=packOpts]{packOpts()}} interprets the \code{...} argument of packMsg and
+packMsgs. it is not exported.
+}
+\details{
+Strings are re-encoded to UTF-8 if necessary. Real numbers
+taking integral values may be emitted as integers to save space.
+
+Normally an R vector of length 1 will be unboxed, e.g. packMsg(1)
+will make a msgpack integer, but packMsg(c(1,2)) will make a
+msgpack list. To prevent this and produce a list of length 1 in the
+first case, specify \code{as_is = TRUE}. Objects of class \code{AsIs} or
+\code{data.frame} will always be encoded as-is.
+
+A hook for pre-processing R objects before packing is supported, by
+giving the object an S3 \link{class} and implementing a method
+\code{prepack}. For instance, \code{prepack.data.frame(x)} simply adds the
+\code{"AsIs"} class to \code{x}.
+
+Environment objects are written out with the keys in sorted order,
+but named vectors are written in the order which the entries
+appear.
+
+Object attributes other than \code{names} and \code{class} are ignored.
 }
 \examples{
 packMsg( list(compact=TRUE, schema=0) )

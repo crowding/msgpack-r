@@ -1,23 +1,15 @@
-#' Read and write msgpack messages using a connection.
+#' Read and write msgpack formatted messages over R connections.
+#'
+#' A `msgConnection` object decodes msgpack messages from an
+#' underlying R raw connection.
 #'
 #' @param con A [connection] object open in binary mode.
-#' @param max_size The largest partial uncompleted message to
-#'   store. `NA` means do not enforce a limit.
+#' @param max_size The largest partial message to store, in
+#'   bytes. `NA` means do not enforce a limit.
 #' @param read_size How many bytes to read at a time.
 #' @param ... Unpacking options (see [unpackMsg]).
-#' @return `msgConnection()` returns an object of class "`msgConnection`".
-#'
-#' Because msgpack messages have unpredictable length, the decoder
-#' reads ahead in chunks, then finds the boundaries between messages.
-#' Therefore when reading over a socket or a fifo it is best to use a
-#' nonblocking connection, and it will not work to mix readMsg and
-#' readBin on the same connection.
-#'
-#' If you are reading data from a not completely trusted source you
-#' should specify options `max_size` and `max_depth` (see
-#' [unpackOpts]). Without it, some deeply nested or cleverly designed
-#' messages can cause a stack overflow or out-of-memory error.  With
-#' these options set, you will get an R exception instead.
+#' @return `msgConnection()` returns an object of class
+#'   `msgConnection`.
 #'
 #' @examples
 #' out <- rawConnection(raw(0), open="wb")
@@ -195,10 +187,11 @@ readMsgs.msgConnection <- function(con, n = NA, ...) {
 #' @rdname msgConnection
 #' @return `status(con)` returns the status of msgpack decoding on the
 #'   connection. A value of `"ok"` indicates all requested messages
-#'   were read, `"buffer underflow"` indicates a partial message is on
-#'   the line, `"end of input"` means the last available message has
-#'   been read.  Other values indicate errors encountered in decoding,
-#'   which will effectively halt reading.
+#'   were read, `"buffer underflow"` for a non-blocking connection
+#'   indicates that only part of a message has been received, and
+#'   `"end of input"` means the last available message has been read.
+#'   Other values indicate errors encountered in decoding, which will
+#'   effectively halt reading.
 #' @export
 status <- function(con) UseMethod("status")
 
@@ -210,8 +203,9 @@ status.msgConnection <- function(con) {
 
 
 #' @rdname msgConnection
-#' @return `seek(con)` returns the number of bytes that have been successfully
-#' read or written.
+#' @return `seek(con)` returns the number of bytes that have been
+#'   successfully read or written, depending on the mode of the
+#'   connection. (Repositioning is not supported.)
 #' @param rw See `seek()`.
 #' @export
 seek.msgConnection <- function(con, rw = summary(con)$mode, ...) {
@@ -222,8 +216,11 @@ seek.msgConnection <- function(con, rw = summary(con)$mode, ...) {
          )
 }
 
+#' `readMsg(con)` reads exactly one message from a
+#'   msgConnection, or throws an error.
+#'
 #' @rdname msgConnection
-#' @return `readMsg(con)` returns exactly one message, or throws an error.
+#' @return `readMsg(con)` returns one decoded message.
 #' @export
 readMsg <- function(con, ...) {
   UseMethod("readMsg", con)
@@ -238,7 +235,7 @@ readMsg.msgConnection <- function(con, ...) {
   x[[1]]
 }
 
-#' ...
+#' `writeMsg(x, con)` writes a single message to a msgConnection.
 #'
 #' @rdname msgConnection
 #' @param obj An R object.
@@ -257,12 +254,26 @@ writeMsg.msgConnection <- function(obj, con, ...) {
   writeMsgs(list(obj), con, ...)
 }
 
-#' ...
-#'
 #' `writeMsgs(l, conn)` writes a list of
 #'   messages to a connection. That is, `writeMsg(1:10, conn)` writes one
 #'   message containing an array, while `writeMsgs(1:10, conn)` writes
 #'   ten consecutive messages each containing one integer.
+#'
+#' `writeMsg` will work with anyR connection inraw mode, but reading
+#' requires a msgConnection object.
+#'
+#' Because msgpack messages have unpredictable length, the decoder
+#' reads ahead in chunks, then finds the boundaries between messages.
+#' Therefore when reading over a socket or a fifo it is best to use a
+#' nonblocking connection, and it will not work to mix readMsg and
+#' readBin on the same connection.
+#'
+#' If you are reading data from a not completely trusted source you
+#' should specify options `max_size` and `max_depth` (see
+#' [unpackOpts]). Without it, some deeply nested or cleverly designed
+#' messages can cause a stack overflow or out-of-memory error.  With
+#' these options set, you will get an R exception instead.
+
 #' @rdname msgConnection
 #' @param objs A list of R objects.
 #' @export

@@ -1,34 +1,12 @@
-#' Unpack raw objects in msgpack format into R data structures.
+#' Decode msgpack messages.
+#'
+#' `unpackMsg` converts a raw array containing one message in msgpack
+#' format into the corresponding R data structure.
 #'
 #' @param x A [raw()] object, perhaps read from a file or socket.
 #' @param ... Options passed to [unpackOpts].
 #' @return `unpackMsg(x)` returns one decoded message (which might be
 #'   shorter than the input raw), or throws an error.
-#'
-#' The msgpack format does not have typed arrays, so all msgpack
-#' arrays are effectively lists from the R perspective. However, if an
-#' array containing compatibly typed elements is read, `unpack` will
-#' return a logical, integer, real or string vector as
-#' appropriate. This behavior is disabled with `simplify=FALSE`.  The
-#' coercion used is more conservative than R's coercion: Integer
-#' values may be converted to real, but boolean values will not be
-#' cast to numeric, nor any types to string. If conversion from a
-#' large integer to real loses precision, a warning is printed.
-#'
-#' Msgpack also does not distinguish between `NA` and `NULL`. All nils
-#' will be decoded as NA.
-#'
-#' Strings are assumed to be UTF-8 encoded. If a msgpack string does
-#' not appear to be valid UTF-8, a warning is printed and a raw object
-#' is produced instead.
-#'
-#' Msgpack allows any type to be the key of a dict, but R only
-#' supports strings. If a non-string appears as key in a msgpack dict,
-#' it will be converted to string with [deparse()].
-#'
-#' Extension types will be decoded as raw objects with a class like
-#' `"ext120"` and a warning.
-#'
 #' @useDynLib msgpack, .registration = TRUE
 #' @examples
 #' msg <- as.raw(c(0x82, 0xa7, 0x63, 0x6f, 0x6d, 0x70, 0x61, 0x63, 0x74, 0xc3,
@@ -42,7 +20,7 @@ unpackMsg <- function(x, ...) {
 dbg <- alist
 #dbg <- cat
 
-#' Extract a number of msgpack messages from a raw object.
+#' `unpackMsgs` extracts a number of msgpack messages from a raw object.
 #'
 #' @param n How many messages to read. An "NA" here means to read as
 #'   much as possible.
@@ -124,9 +102,8 @@ unpackMsgs <- function(x, n = NA, reader = NULL, ...) {
        bytes_read = bread)
 }
 
-#' [unpackOpts()] interprets the options that are common to
-#' [unpackMsgs()], [unpackMsg()], and [msgConnection()]. It is not
-#' exported.
+#' [unpackOpts()] interprets is passed to `...` in [unpackMsgs()],
+#' [unpackMsg()], and [msgConnection()]. It is not exported.
 #'
 #' @param parent When an environment is given, (such as [emptyenv()]),
 #'   unpack msgpack dicts into environment objects, with the given
@@ -139,6 +116,32 @@ unpackMsgs <- function(x, n = NA, reader = NULL, ...) {
 #' @param max_size The maximum length of message to decode.
 #' @param max_depth The maximum degree of nesting to support.
 #' @param underflow_handler Used internally.
+#'
+#' @details
+#' The msgpack format does not have typed arrays, so all msgpack
+#' arrays are effectively lists from the R perspective. However, if an
+#' array containing compatibly typed elements is read, `unpack` will
+#' return a logical, integer, real or string vector as
+#' appropriate. This behavior is disabled with `simplify=FALSE`.  The
+#' coercion used is more conservative than R's coercion: Integer
+#' values may be converted to real, but boolean values will not be
+#' cast to numeric, nor any types to string. If conversion from a
+#' large integer to real loses precision, a warning is printed.
+#'
+#' Msgpack also does not distinguish between `NA` and `NULL`. All nils
+#' will be decoded as NA.
+#'
+#' Strings are assumed to be UTF-8 encoded. If a msgpack string does
+#' not appear to be valid UTF-8, a warning is printed and a raw object
+#' is produced instead.
+#'
+#' Msgpack allows any type to be the key of a dict, but R only
+#' supports strings. If a non-string appears as key in a msgpack dict,
+#' it will be converted to string with [deparse()].
+#'
+#' Extension types will be decoded as raw objects with a class like
+#' `"ext120"` and a warning.
+#'
 #' @rdname unpackMsg
 unpackOpts <- function(parent = NULL,
                        df = TRUE,
