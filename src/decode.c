@@ -1,3 +1,4 @@
+#include <R_ext/Arith.h>
 #include "decode.h"
 
 #include <inttypes.h>
@@ -42,10 +43,20 @@ const char *decode_item_type(cwpack_item_types);
 /* used to make WARN_ONCE work: once per call */
 static long calls = 0;
 
-int isNA (SEXP item) {
-  if (asReal(item) == NA_REAL) return 1;
-  else return 0;
+void * dataptr_or_null(SEXP x) {
+  switch(TYPEOF(x)) {
+  case VECSXP: return VECTOR_PTR(x);
+  case RAWSXP: return RAW(x);
+  case LGLSXP: return LOGICAL(x);
+  case INTSXP: return INTEGER(x);
+  case REALSXP: return REAL(x);
+  case CPLXSXP: return COMPLEX(x);
+  case STRSXP: return STRING_PTR(x);
+  default: return 0;
+  }
 }
+
+
 
 SEXP _unpack_opts(SEXP dict,
                   SEXP use_df,
@@ -66,15 +77,24 @@ SEXP _unpack_opts(SEXP dict,
                              here. Whoever fills it out is responsible
                              for managing protection. */
   opts->buf_index = -1;
-  if (isNA(max_size)) opts->max_pending = ULONG_MAX;
-  else opts->max_pending = asReal(max_size);
-  if (isNA(max_depth)) opts->max_depth = UINT_MAX;
-  else opts->max_depth = asInteger(max_depth);
+  if (!R_finite(asReal(max_size))) {
+    opts->max_pending = ULONG_MAX;
+    LOG("max_size passed is not finite [%s: 0x%02lx]", type2char(TYPEOF(max_size)), *((unsigned long *) dataptr_or_null(max_size)));
+  } else {
+    LOG("max_size passed is finite [%s: 0x%02lx]",  type2char(TYPEOF(max_size)), *((unsigned long *) dataptr_or_null(max_size)));
+    opts->max_pending = asReal(max_size); /* as real since it may be > 2^32 */ 
+  }
+  if (!R_finite(asReal(max_depth))) {
+    opts->max_depth = UINT_MAX;
+  } else {
+    opts->max_depth = asInteger(max_depth); 
+  }
+  LOG("max_size = %f -> %lu; max_depth = %f -> %lu", asReal(max_size), opts->max_pending, asReal(max_depth), opts->max_depth);
 
-  /* To make sure that R does not finalize the objects I'm using in
+  /* To make sure that R does not finalize the objects I'm using,
      also hang the object references off of it.
      
-     The buffer decide buffer is handled in init_unpack_context. */
+     The decode buffer is handled in init_unpack_context. */
   SEXP refs = PROTECT(CONS(dict,
                            CONS(package,
                                 CONS(underflow_handler,
@@ -268,7 +288,7 @@ void add_pending(cw_unpack_context *cxt, unsigned long howmany) {
   }
   cxt->opts->pending += howmany;
   if (cxt->opts->pending >= cxt->opts->max_pending) {
-    error("Pending message too long");
+    error("Pending message of %lu bytes too long, max is %lu", cxt->opts->pending, cxt->opts->max_pending);
   }
   LOGD("depth = %u, pending = %lu", cxt->opts->depth, cxt->opts->pending); 
 }

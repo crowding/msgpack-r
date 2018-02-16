@@ -1,5 +1,4 @@
 context("unpack from streams")
-
 #most of these tests to be implemented using a fifo connection.
 
 `%is%` <- expect_equal
@@ -9,14 +8,9 @@ msgs <- as.raw(c(0xa5, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
                  0xa7, 0x67, 0x6f, 0x6f))
 
 two_ends <- function(f, read_size = 2^16, max_buf = NA) {
-  fnam <- tempfile()
-  on.exit(unlink(fnam, force=TRUE))
-  system(paste("mkfifo", fnam))
-  end_B <- msgConnection(fifo(fnam, open="rb", blocking=FALSE))
-  on.exit(close(end_B), add=TRUE)
-  end_A <- msgConnection(fifo(fnam, open="wb", blocking=FALSE))
-  on.exit(close(end_A), add=TRUE)
-  f(end_A, end_B)
+  fl <- file("", open="w+b", blocking=FALSE)
+  on.exit(close(fl), add=TRUE)
+  f(fl, msgConnection(fl))
 }
 
 test_that("consume N messages and return remaining data", {
@@ -46,7 +40,8 @@ test_that("consume N messages and return remaining data", {
 })
 
 test_that("packMsgs round trip", {
-  unpackMsgs(packMsgs(c(list(1:10), 1:10)))
+  unpackMsgs(packMsgs(c(list(1:10), 1:10)))$msgs %is%
+    c(list(1:10), as.list(1:10))
 })
 
 test_that("Errors raised in parsing are caught", {

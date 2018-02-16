@@ -3,11 +3,6 @@ context("msgpackr static API")
 `%is%` <- expect_equal
 
 
-stringToRaw <- function(ch) {
-  vapply(strsplit("hello", "")[[1]], charToRaw, raw(1))
-}
-
-
 roundtrip <- function(start) {
   bin <- packMsg(start)
   end <- unpackMsg(bin)
@@ -22,7 +17,6 @@ pack_rt <- function (start, cmp) {
   end <- unpackMsg(bin)
   expect_equivalent(start, end)
 }
-
 
 test_that("pack singletons", {
   #null
