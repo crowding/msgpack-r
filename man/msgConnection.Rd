@@ -49,7 +49,7 @@ bytes. \code{NA} means do not enforce a limit.}
 \item{n}{The maximum number of messages to read. A value of NA
 means to parse all available messages until end of input.}
 
-\item{rw}{See \code{seek()}.}
+\item{rw}{See \code{\link[=seek]{seek()}}.}
 
 \item{obj}{An R object.}
 
@@ -87,7 +87,7 @@ msgConnection, or throws an error.
 
 \code{writeMsg(x, con)} writes a single message to a msgConnection.
 
-\code{writeMsg} will work with anyR connection inraw mode, but reading
+\code{writeMsg} will work with any R connection in raw mode, but reading
 requires a msgConnection object.
 }
 \details{

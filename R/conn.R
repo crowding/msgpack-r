@@ -206,7 +206,7 @@ status.msgConnection <- function(con) {
 #' @return `seek(con)` returns the number of bytes that have been
 #'   successfully read or written, depending on the mode of the
 #'   connection. (Repositioning is not supported.)
-#' @param rw See `seek()`.
+#' @param rw See [seek()].
 #' @export
 seek.msgConnection <- function(con, rw = summary(con)$mode, ...) {
   rw <- pmatch(rw, c("read", "write"), 0L)
@@ -259,7 +259,7 @@ writeMsg.msgConnection <- function(obj, con, ...) {
 #'   message containing an array, while `writeMsgs(1:10, conn)` writes
 #'   ten consecutive messages each containing one integer.
 #'
-#' `writeMsg` will work with anyR connection inraw mode, but reading
+#' `writeMsg` will work with any R connection in raw mode, but reading
 #' requires a msgConnection object.
 #'
 #' Because msgpack messages have unpredictable length, the decoder
