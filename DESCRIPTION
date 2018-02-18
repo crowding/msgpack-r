@@ -8,7 +8,7 @@ Description: A fast C-based encoder and streaming decoder for the
              drop-in replacement for JSON, but is more compact and
              faster to parse. Based on the CWPack C library.
 Depends:
-    R (>= 3.3.1)
+    R (>= 3.3.0)
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
