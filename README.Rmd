@@ -1,6 +1,6 @@
 ---
 title: "msgpack for R"
-knit: (function(inputFile, encoding) { rmarkdown::render("README.Rmd", output_format = "github_document", output_file = "README.md")})
+output: github_document
 ---
 
 This is a high speed [msgpack][2] encoder and decoder for R, based on the
@@ -9,9 +9,13 @@ This is a high speed [msgpack][2] encoder and decoder for R, based on the
 2: https://msgpack.org
 
 `msgpack` is a binary data format with compact encoding and data
-structure support similar to JSON. It can be a drop-in replacementfor
+structure support similar to JSON. It can be a drop-in replacement for
 JSON in most applications. It is designed to be fast to parse and
 compact to transmit and store.
+
+```{R echo=FALSE}
+knitr::opts_chunk$set(collapse=TRUE)
+```
 
 ## Installation
 

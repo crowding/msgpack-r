@@ -2,7 +2,7 @@
 ^\.Rproj\.user$
 ^vignettes/comparison_cache$
 ^vignettes/comparison_files$
-^README.Rmd$
-^README.html$
+^README.*
 .git
 .travis.yml
+gh

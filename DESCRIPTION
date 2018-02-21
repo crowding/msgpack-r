@@ -1,12 +1,13 @@
 Package: msgpack
 Title: A Compact, High Speed Data Format
 Version: 1.0
-Author: Peter Meilstrup <peter.meilstrup@gmail.com>
-Maintainer: Peter Meilstrup <peter.meilstrup@gmail.com>
+Authors@R: c(person("Peter", "Meilstrup", email="peter.meilstrup@gmail.com", role=c("aut", "cre", "cph")),
+             person("Claes", "Wihlborg", role=c("ctr", "cph")),
+             person("Höhrmann", "Björn", role=c("ctr", "cph"), email="bjoern@hoehrmann.de"))
 Description: A fast C-based encoder and streaming decoder for the
-             msgpack data format, Msgpack is nearly a
-             drop-in replacement for JSON, but is more compact and
-             faster to parse. Based on the CWPack C library.
+             'messagepack' data format. 'Messagepack' is similar in structure
+             to 'JSON' but uses a more compact binary encoding. Based on the
+             CWPack C library.
 Depends:
     R (>= 3.3.0)
 License: MIT + file LICENSE
