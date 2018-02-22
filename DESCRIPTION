@@ -3,11 +3,11 @@ Title: A Compact, High Speed Data Format
 Version: 1.0
 Authors@R: c(person("Peter", "Meilstrup", email="peter.meilstrup@gmail.com", role=c("aut", "cre", "cph")),
              person("Claes", "Wihlborg", role=c("ctr", "cph")),
-             person("Höhrmann", "Björn", role=c("ctr", "cph"), email="bjoern@hoehrmann.de"))
+             person("Björn", "Höhrmann", role=c("ctr", "cph")))
 Description: A fast C-based encoder and streaming decoder for the
              'messagepack' data format. 'Messagepack' is similar in structure
              to 'JSON' but uses a more compact binary encoding. Based on the
-             CWPack C library.
+             'CWPack' C library.
 Depends:
     R (>= 3.3.0)
 License: MIT + file LICENSE

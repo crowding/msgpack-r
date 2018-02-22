@@ -1,32 +1,42 @@
----
-title: "msgpack for R"
-output: github_document
----
+msgpack for R
+================
+Peter Meilstrup
+February 22, 2018
 
-This is a high speed [msgpack][2] encoder and decoder for R, based on the
-[CWPack][1] C implementation.
-1: https://github.com/clwi/CWPack
-2: https://msgpack.org
+[![CRAN version
+badge](http://www.r-pkg.org/badges/version/msgpack)](https://cran.r-project.org/package=msgpack)
+[![Travis build
+status](http://travis-ci.org/crowding/msgpack-r.svg?branch=master)](https://travis-ci.org/crowding/msgpack-r)
+[![Code
+coverage](https://codecov.io/gh/crowding/msgpack-r/branch/master/graph/badge.svg)](https://codecov.io/gh/crowding/msgpack-r)
 
-`msgpack` is a binary data format with compact encoding and data
-structure support similar to JSON. It can be a drop-in replacement for
-JSON in most applications. It is designed to be fast to parse and
+This is a high speed [msgpack](https://github.com/clwi/CWPack) encoder
+and decoder for R, based on the [CWPack](https://msgpack.org) C
+implementation.
+
+`msgpack` is a binary data format with data structures similar to `JSON`
+and a compact binary encoding. It can be a drop-in replacement for
+`JSON` in most applications. It is designed to be fast to parse and
 compact to transmit and store.
-
-
 
 ## Installation
 
+From CRAN:
 
-```r
+``` r
+install.packages("msgpack")
+```
+
+From Github:
+
+``` r
 library(devtools)
 install_github("crowding/msgpack-r")
 ```
 
 ## Usage
 
-
-```r
+``` r
 library(msgpack)
 x <- packMsg( list(compact=TRUE, schema=0) )
 x
@@ -38,11 +48,18 @@ dput(unpackMsg( x ))
 
 ### Connections / Streaming
 
+Write messages one or several at a time:
 
-```r
-conOut <- rawConnection(raw(0), open = "w") #or socketConnection, etc
+``` r
+conOut <- rawConnection(raw(0), open = "w") # or socketConnection, etc
 writeMsg("one", conOut)
 writeMsgs(list(2, c(buckle=TRUE), c(owner="my", type="shoe")), conOut)
+```
+
+Use a `msgConnection` object to read messages one or several at a
+time:
+
+``` r
 conIn <- msgConnection(rawConnection(rawConnectionValue(conOut), open = "r"))
 dput(readMsgs(conIn, 2))
 ## list("one", 2L)
@@ -54,8 +71,11 @@ dput(readMsgs(conIn))
 
 ### Performance
 
-Msgpack is fast and compact. See the [benchmarking vignette](vignettes/comparison.html).
+Msgpack is fast and compact. See the [benchmarking
+vignette](inst/doc/comparison.html).
 
-![Plot of time taken to transmit dataset, vs size of dataset, for each encoder under four conditions.](gh/space.svg)
+![Plot of time taken to transmit dataset, vs size of dataset, for each
+encoder under four conditions.](gh/space.svg)
 
-![Comparison of space used by each encoder to encode a test dataset.](gh/time.svg)
+![Comparison of space used by each encoder to encode a test
+dataset.](gh/time.svg)

@@ -4,3 +4,6 @@
 *.so
 *.o
 *.bc
+README.html
+vignettes/comparison*
+src/symbols.rds
