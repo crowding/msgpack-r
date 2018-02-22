@@ -1,7 +1,6 @@
 msgpack for R
 ================
 Peter Meilstrup
-February 22, 2018
 
 [![CRAN version
 badge](http://www.r-pkg.org/badges/version/msgpack)](https://cran.r-project.org/package=msgpack)
@@ -10,8 +9,8 @@ status](http://travis-ci.org/crowding/msgpack-r.svg?branch=master)](https://trav
 [![Code
 coverage](https://codecov.io/gh/crowding/msgpack-r/branch/master/graph/badge.svg)](https://codecov.io/gh/crowding/msgpack-r)
 
-This is a high speed [msgpack](https://github.com/clwi/CWPack) encoder
-and decoder for R, based on the [CWPack](https://msgpack.org) C
+This is a high speed [msgpack](https://msgpack.org) encoder and decoder
+for R, based on the [CWPack](https://github.com/clwi/CWPack) C
 implementation.
 
 `msgpack` is a binary data format with data structures similar to `JSON`
