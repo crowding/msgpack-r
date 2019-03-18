@@ -28,7 +28,7 @@ Of course, speed might not be your only criterion. Different data
 formats have different capabilities and purposes:
 
 * `serialize()` is your best best for getting R objects out of and
-  back into R the way you had them, but doesn't do much for you wneh
+  back into R the way you had them, but doesn't do much for you when
   communicating with other systems.
 * `dump()` is your next best bet, while being a somewhat
   human-readable text format.

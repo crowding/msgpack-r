@@ -82,11 +82,6 @@ connection. (Repositioning is not supported.)
 A \code{msgConnection} object decodes msgpack messages from an
 underlying R raw connection.
 
-\code{readMsg(con)} reads exactly one message from a
-msgConnection, or throws an error.
-
-\code{writeMsg(x, con)} writes a single message to a msgConnection.
-
 \code{writeMsg} will work with any R connection in raw mode, but reading
 requires a msgConnection object.
 }
@@ -105,9 +100,12 @@ these options set, you will get an R exception instead.
 }
 \examples{
 out <- rawConnection(raw(0), open="wb")
-apply(quakes, 1, function(x) writeMsg(x, out))
+apply(quakes, 1, function(x) writeMsg(x, out)) # one message for each row
 length(rawConnectionValue(out))
 inn <- msgConnection(rawConnection(rawConnectionValue(out), open="rb"))
+close(out)
 readMsg(inn)
 readMsgs(inn, 3)
+length(readMsgs(inn))
+close(inn)
 }

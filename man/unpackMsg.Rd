@@ -10,8 +10,8 @@ unpackMsg(x, ...)
 
 unpackMsgs(x, n = NA, reader = NULL, ...)
 
-unpackOpts(parent = NULL, df = TRUE, simplify = TRUE, max_size = NA,
-  max_depth = NA, underflow_handler = NULL)
+unpackOpts(parent = NULL, df = TRUE, simplify = TRUE,
+  max_size = NA, max_depth = NA, underflow_handler = NULL)
 }
 \arguments{
 \item{x}{A \code{\link[=raw]{raw()}} object, perhaps read from a file or socket.}
@@ -57,11 +57,6 @@ or "buffer underflow".
 \description{
 \code{unpackMsg} converts a raw array containing one message in msgpack
 format into the corresponding R data structure.
-
-\code{unpackMsgs} extracts a number of msgpack messages from a raw object.
-
-\code{\link[=unpackOpts]{unpackOpts()}} interprets is passed to \code{...} in \code{\link[=unpackMsgs]{unpackMsgs()}},
-\code{\link[=unpackMsg]{unpackMsg()}}, and \code{\link[=msgConnection]{msgConnection()}}. It is not exported.
 }
 \details{
 The msgpack format does not have typed arrays, so all msgpack

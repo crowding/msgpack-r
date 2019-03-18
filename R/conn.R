@@ -13,11 +13,14 @@
 #'
 #' @examples
 #' out <- rawConnection(raw(0), open="wb")
-#' apply(quakes, 1, function(x) writeMsg(x, out))
+#' apply(quakes, 1, function(x) writeMsg(x, out)) # one message for each row
 #' length(rawConnectionValue(out))
 #' inn <- msgConnection(rawConnection(rawConnectionValue(out), open="rb"))
+#' close(out)
 #' readMsg(inn)
 #' readMsgs(inn, 3)
+#' length(readMsgs(inn))
+#' close(inn)
 #' @export
 msgConnection <- function(con, read_size=2^16, max_size=NA, ...) {
   partial <- raw(0)

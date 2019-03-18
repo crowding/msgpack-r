@@ -167,6 +167,7 @@ void pack_sexp(cw_pack_context* cxt, SEXP dat) {
   if (isVector(dat)) {
     SEXP names = getAttrib(dat, R_NamesSymbol);
     if (names != R_NilValue && cxt->opts->use_dict) {
+      PROTECT(names); unp += 1;
       pack_named_vector(cxt, dat, names);
     } else if (LENGTH(dat) == 1 && !cxt->opts->as_is) {
       pack_singleton(cxt, dat);
