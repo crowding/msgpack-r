@@ -1,0 +1,12 @@
+msgpack 1.0.1
+==========
+
+Version 1.0.1
+
+    * Updated an example which prevented `R CMD check` from passing on Windows.
+    * Fixed a protection issue flagged by `rchk`.
+
+msgpack 1.0
+==========
+
+Initial release.

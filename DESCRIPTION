@@ -1,6 +1,6 @@
 Package: msgpack
 Title: A Compact, High Speed Data Format
-Version: 1.0
+Version: 1.0.1
 Authors@R: c(person("Peter", "Meilstrup", email="peter.meilstrup@gmail.com", role=c("aut", "cre", "cph")),
              person("Claes", "Wihlborg", role=c("ctr", "cph")),
              person("Björn", "Höhrmann", role=c("ctr", "cph")))
